@@ -173,3 +173,4 @@ test_memory
 test_emit.c
 demo_output
 final_demo
+object_inheritance
