@@ -6,12 +6,12 @@ Future versions will support direct LLVM IR generation.
 
 import sys
 from typing import Dict, Optional
+from .parser import ClassInfo, FieldInfo, FunctionInfo
 from .ir import (
     NaginiIR, FunctionIR, StmtIR, ExprIR,
     ConstantIR, VariableIR, BinOpIR, UnaryOpIR, CallIR, AttributeIR,
     AssignIR, ReturnIR, IfIR, WhileIR, ForIR, ExprStmtIR
 )
-from .parser import ClassInfo, FieldInfo
 
 
 class LLVMBackend:
@@ -390,12 +390,9 @@ class LLVMBackend:
             self.output_code.append(f'}} {class_info.name};')
             self.output_code.append('')
     
-    def _gen_class_method(self, class_info: ClassInfo, method_info):
+    def _gen_class_method(self, class_info: ClassInfo, method_info: FunctionInfo):
         """Generate a method for a class"""
-        from .parser import FunctionInfo
-        
         # Convert FunctionInfo to FunctionIR
-        from .ir import NaginiIR
         temp_ir = NaginiIR({}, {})
         method_ir = temp_ir._convert_function_to_ir(method_info)
         
@@ -638,13 +635,13 @@ class LLVMBackend:
         elif isinstance(expr, AttributeIR):
             # Member access
             obj_code = self._gen_expr(expr.obj)
-            # For now, use simple dot notation
+            # Check if accessing self (parameter names tracked in declared_vars)
+            # For now use simple dot notation
             # TODO: For object paradigm with hash tables, use ht_get
             # For data paradigm, use direct member access
-            if obj_code == 'self':
-                # Accessing member on self - for now use comment
-                # In full implementation, would use ht_get for object paradigm
-                return f'self->{expr.attr}  /* TODO: use hash table for object paradigm */'
+            if isinstance(expr.obj, VariableIR) and expr.obj.name in self.declared_vars:
+                # Accessing member on a known variable (possibly self)
+                return f'{obj_code}->{expr.attr}  /* TODO: use hash table for object paradigm */'
             return f'{obj_code}.{expr.attr}'
         
         return '/* unknown expr */'

@@ -4,7 +4,7 @@ Provides an intermediate representation of the Nagini program for code generatio
 """
 
 import ast
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from .parser import ClassInfo, FieldInfo, FunctionInfo
 
@@ -246,9 +246,10 @@ class NaginiIR:
         
         elif isinstance(stmt, ast.Expr):
             # Expression statement (e.g., function call)
-            # Skip string constants (docstrings)
+            # Skip string constants (docstrings) only if they appear at the start
             if isinstance(stmt.value, ast.Constant) and isinstance(stmt.value.value, str):
-                return None  # Skip docstrings
+                # This is likely a docstring, skip it
+                return None
             expr = self._convert_expr_to_ir(stmt.value)
             return ExprStmtIR(expr)
         
@@ -328,6 +329,7 @@ class NaginiIR:
             return SubscriptIR(obj, index)
         
         # Return a placeholder for unsupported expressions
+        # TODO: Add better error handling or warnings for unsupported expression types
         return ConstantIR(0, 'unknown')
     
     def _binop_to_str(self, op: ast.operator) -> str:
