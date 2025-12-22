@@ -1,0 +1,32 @@
+# Nagini Memory Management Example
+# Demonstrates different allocation strategies and paradigms
+
+@property(malloc_strategy='pool', layout='cpp', paradigm='object')
+class GameObject:
+    id: int
+    x: float
+    y: float
+    health: int
+
+@property(malloc_strategy='gc', layout='cpp', paradigm='object')
+class Player:
+    name: str
+    level: int
+    score: int
+
+@property(malloc_strategy='heap', layout='std430', paradigm='data')
+class Vertex:
+    x: float
+    y: float
+    z: float
+    
+@property(malloc_strategy='pool', layout='cpp', paradigm='data')
+class Component:
+    active: bool
+    type_id: int
+
+# This example demonstrates the different memory strategies:
+# - GameObject uses pool allocation (fastest, automatic cleanup)
+# - Player uses GC allocation (reference counted, automatic)
+# - Vertex uses heap allocation (manual control)
+# - Component uses data paradigm (lightweight, no object header)
