@@ -30,6 +30,12 @@ class LLVMBackend:
         # Generate headers
         self._gen_headers()
         
+        # Generate base Object class and reference counting functions
+        self._gen_base_object()
+        
+        # Generate built-in types
+        self._gen_builtins()
+        
         # Generate class structs
         for class_name, class_info in self.ir.classes.items():
             self._gen_class_struct(class_info)
@@ -45,6 +51,76 @@ class LLVMBackend:
         self.output_code.append('#include <stdio.h>')
         self.output_code.append('#include <stdlib.h>')
         self.output_code.append('#include <stdint.h>')
+        self.output_code.append('#include <string.h>')
+        self.output_code.append('')
+    
+    def _gen_base_object(self):
+        """Generate base Object class that all Nagini objects inherit from"""
+        self.output_code.append('/* Base Object class - all Nagini objects inherit from this */')
+        self.output_code.append('typedef struct {')
+        self.output_code.append('    int64_t __refcount__;  /* Reference counter (8 bytes) */')
+        self.output_code.append('} Object;')
+        self.output_code.append('')
+        
+        # Generate retain function
+        self.output_code.append('/* Increment reference count and return object */')
+        self.output_code.append('void* retain(void* obj) {')
+        self.output_code.append('    if (obj != NULL) {')
+        self.output_code.append('        Object* o = (Object*)obj;')
+        self.output_code.append('        o->__refcount__++;')
+        self.output_code.append('    }')
+        self.output_code.append('    return obj;')
+        self.output_code.append('}')
+        self.output_code.append('')
+        
+        # Generate release function
+        self.output_code.append('/* Decrement reference count and free if zero */')
+        self.output_code.append('void release(void* obj) {')
+        self.output_code.append('    if (obj != NULL) {')
+        self.output_code.append('        Object* o = (Object*)obj;')
+        self.output_code.append('        o->__refcount__--;')
+        self.output_code.append('        if (o->__refcount__ == 0) {')
+        self.output_code.append('            free(obj);')
+        self.output_code.append('        }')
+        self.output_code.append('    }')
+        self.output_code.append('}')
+        self.output_code.append('')
+    
+    def _gen_builtins(self):
+        """Generate built-in types (Int, Double, String, List)"""
+        # Int class (64-bit integer)
+        self.output_code.append('/* Built-in Int class (64-bit integer) */')
+        self.output_code.append('typedef struct {')
+        self.output_code.append('    int64_t __refcount__;  /* Inherited from Object */')
+        self.output_code.append('    int64_t value;')
+        self.output_code.append('} Int;')
+        self.output_code.append('')
+        
+        # Double class (64-bit float)
+        self.output_code.append('/* Built-in Double class (64-bit float) */')
+        self.output_code.append('typedef struct {')
+        self.output_code.append('    int64_t __refcount__;  /* Inherited from Object */')
+        self.output_code.append('    double value;')
+        self.output_code.append('} Double;')
+        self.output_code.append('')
+        
+        # String class
+        self.output_code.append('/* Built-in String class */')
+        self.output_code.append('typedef struct {')
+        self.output_code.append('    int64_t __refcount__;  /* Inherited from Object */')
+        self.output_code.append('    char* data;')
+        self.output_code.append('    int64_t length;')
+        self.output_code.append('} String;')
+        self.output_code.append('')
+        
+        # List class
+        self.output_code.append('/* Built-in List class */')
+        self.output_code.append('typedef struct {')
+        self.output_code.append('    int64_t __refcount__;  /* Inherited from Object */')
+        self.output_code.append('    void** data;')
+        self.output_code.append('    int64_t length;')
+        self.output_code.append('    int64_t capacity;')
+        self.output_code.append('} List;')
         self.output_code.append('')
         
     def _gen_class_struct(self, class_info: ClassInfo):
@@ -53,16 +129,14 @@ class LLVMBackend:
         self.output_code.append(f'/* malloc_strategy: {class_info.malloc_strategy} */')
         self.output_code.append(f'/* layout: {class_info.layout} */')
         self.output_code.append(f'/* paradigm: {class_info.paradigm} */')
+        self.output_code.append(f'/* parent: {class_info.parent} */')
         
         self.output_code.append(f'typedef struct {{')
         
         # Add object header for object paradigm
         if class_info.paradigm == 'object':
-            self.output_code.append('    /* Object Header */')
-            self.output_code.append('    uint64_t type_id;')
-            self.output_code.append('    uint32_t alloc_type;')
-            self.output_code.append('    uint32_t ref_count;')
-            self.output_code.append('    void* parent_ptr;')
+            self.output_code.append(f'    /* Inherited from {class_info.parent} */')
+            self.output_code.append('    int64_t __refcount__;  /* Reference counter (8 bytes) */')
             self.output_code.append('')
         
         # Add fields

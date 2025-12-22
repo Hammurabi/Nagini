@@ -23,10 +23,10 @@ class ClassInfo:
     """Information about a Nagini class"""
     name: str
     fields: List[FieldInfo]
-    malloc_strategy: str = 'pool'  # pool, gc, heap
+    malloc_strategy: str = 'gc'   # gc (default), pool, heap
     layout: str = 'cpp'           # cpp, std430, custom
     paradigm: str = 'object'      # object, data
-    parent: Optional[str] = None
+    parent: Optional[str] = 'Object'  # All classes inherit from Object by default
     
     
 class NaginiParser:
@@ -68,7 +68,7 @@ class NaginiParser:
     def _parse_class(self, node: ast.ClassDef) -> ClassInfo:
         """Parse a class definition node"""
         # Extract properties from decorator
-        malloc_strategy = 'pool'
+        malloc_strategy = 'gc'  # Default to gc strategy
         layout = 'cpp'
         paradigm = 'object'
         
@@ -80,14 +80,22 @@ class NaginiParser:
                     layout = props.get('layout', layout)
                     paradigm = props.get('paradigm', paradigm)
         
+        # Extract parent class (all classes inherit from Object by default)
+        parent = 'Object'
+        if node.bases:
+            # Get the first base class
+            if isinstance(node.bases[0], ast.Name):
+                parent = node.bases[0].id
+        
         # Extract fields from class body
         fields = []
         offset = 0
         
         # Add object header for object paradigm
         if paradigm == 'object':
-            # Object header: 32 bytes (type_id, alloc_type, ref_count, parent_ptr)
-            offset = 32
+            # Object header: 8 bytes (reference counter)
+            # Inherited from Object class
+            offset = 8
         
         for item in node.body:
             if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
@@ -109,7 +117,8 @@ class NaginiParser:
             fields=fields,
             malloc_strategy=malloc_strategy,
             layout=layout,
-            paradigm=paradigm
+            paradigm=paradigm,
+            parent=parent
         )
     
     def _extract_decorator_props(self, decorator: ast.Call) -> Dict[str, str]:

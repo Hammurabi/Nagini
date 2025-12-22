@@ -9,8 +9,10 @@ Nagini is a compiled, Python-inspired, fully object-oriented/data-oriented progr
 
 - **Pythonic Syntax** – Easy to read and write, minimal boilerplate
 - **Compiled to Native Code** – Maximum runtime speed via C/LLVM backend
-- **Flexible Memory Management** – Supports pool, GC, and manual heap allocation
+- **Everything is an Object** – Base Object class with reference counting built-in
+- **Flexible Memory Management** – Supports pool, GC (default), and manual heap allocation
 - **Object & Data Paradigms** – Choose between full objects or lightweight data containers
+- **Built-in Types** – Int, Double, String, and List classes with automatic reference counting
 - **FFI Ready** – Memory layout compatible with C/C++ for seamless interoperability
 
 ## Quick Start
@@ -68,27 +70,60 @@ python3 -m nagini.cli compile example.nag -v
 
 ## Language Syntax
 
+### Base Object Class
+
+All Nagini classes inherit from the base `Object` class by default:
+
+```python
+class Object:
+    __refcount__: int  # 8-byte reference counter
+```
+
+**Reference Counting Functions:**
+
+```python
+def retain(obj: Object) -> Object:
+    """Increment reference count"""
+    obj.__refcount__ += 1
+    return obj
+
+def release(obj: Object):
+    """Decrement reference count and free if zero"""
+    obj.__refcount__ -= 1
+    if obj.__refcount__ == 0:
+        del obj
+```
+
+### Built-in Types
+
+Nagini provides built-in wrapper classes that inherit from Object:
+
+- **Int** – 64-bit integer with reference counting
+- **Double** – 64-bit floating point with reference counting  
+- **String** – String class with automatic memory management
+- **List** – Dynamic list with automatic memory management
+
 ### Class Declaration
 
 ```python
-@property(malloc_strategy='pool', layout='cpp', paradigm='object')
-class Name:
+@property(malloc_strategy='gc', layout='cpp', paradigm='object')
+class Name(Object):
     x: int
     y: float
 ```
 
 **Properties:**
 
-- `malloc_strategy`: `pool` | `gc` | `heap`
+- `malloc_strategy`: `pool` | `gc` (default) | `heap`
   - `pool`: Pre-allocated memory pool (fastest, automatic deallocation)
-  - `gc`: Garbage collected (automatic reference counting)
+  - `gc`: Garbage collected (automatic reference counting) - **DEFAULT**
   - `heap`: Manual allocation/deallocation
 
 - `layout`: `cpp` | `std430` | `custom`
   - Controls memory layout for C/C++ interoperability
 
 - `paradigm`: `object` | `data`
-  - `object`: Full object with metadata, type info, and functions
+  - `object`: Full object with reference counting inherited from Object
   - `data`: Lightweight data container, no overhead
 
 ### Object Allocation (Future)
@@ -141,20 +176,28 @@ nagini/
 │   ├── ir.py             # Intermediate representation
 │   └── backend.py        # Code generation backend
 ├── runtime/
-│   └── __init__.py       # Runtime support (future)
+│   ├── __init__.py       # Runtime support
+│   └── builtins.py       # Base Object and built-in types
 └── examples/
-    ├── hello.nag         # Simple hello world
-    └── hello_class.nag   # Example with class
+    ├── hello.nag              # Simple hello world
+    ├── hello_class.nag        # Example with class
+    ├── memory_example.nag     # Memory strategies demo
+    └── object_inheritance.nag # Object inheritance demo
 ```
 
 ## Current Status (v0.2)
 
 ✅ **Implemented:**
 - AST parsing with Python's built-in parser
+- Base `Object` class with reference counting (8-byte `__refcount__`)
+- Built-in types: `Int`, `Double`, `String`, `List` (all inherit from Object)
+- `retain()` and `release()` functions for reference counting
+- Class inheritance support (all classes inherit from Object by default)
 - Class definition parsing with `@property` decorators
 - Field extraction with type annotations
+- Default GC strategy (reference counting)
 - IR generation
-- C code generation for classes/structs
+- C code generation for classes/structs with inheritance
 - Object header generation for `paradigm='object'`
 - Basic main function generation
 - CLI compiler interface
@@ -163,7 +206,7 @@ nagini/
 🚧 **In Progress:**
 - Object allocation functions (`alloc`, `galloc`)
 - Memory pool management
-- Garbage collection runtime
+- Garbage collection runtime implementation
 - Function definitions and calls
 - Expression evaluation
 - Control flow (if, while, for)
@@ -172,7 +215,7 @@ nagini/
 - Full language features (functions, expressions, statements)
 - Runtime memory management (pool, gc, heap)
 - FFI/C++ interoperability layer
-- Inheritance and polymorphism
+- Multi-level inheritance and polymorphism
 - Standard library
 - LLVM IR backend
 - Optimization passes
