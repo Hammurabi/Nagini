@@ -6,7 +6,11 @@ Future versions will support direct LLVM IR generation.
 
 import sys
 from typing import Dict, Optional
-from .ir import NaginiIR, FunctionIR
+from .ir import (
+    NaginiIR, FunctionIR, StmtIR, ExprIR,
+    ConstantIR, VariableIR, BinOpIR, UnaryOpIR, CallIR, AttributeIR,
+    AssignIR, ReturnIR, IfIR, WhileIR, ForIR, ExprStmtIR
+)
 from .parser import ClassInfo, FieldInfo
 
 
@@ -19,6 +23,7 @@ class LLVMBackend:
     def __init__(self, ir: NaginiIR):
         self.ir = ir
         self.output_code = []
+        self.declared_vars = set()  # Track declared variables
         
     def generate(self) -> str:
         """
@@ -58,6 +63,7 @@ class LLVMBackend:
         self.output_code.append('#include <stdlib.h>')
         self.output_code.append('#include <stdint.h>')
         self.output_code.append('#include <string.h>')
+        self.output_code.append('#include <math.h>')
         self.output_code.append('')
         self.output_code.append('/* Forward declarations */')
         self.output_code.append('typedef struct HashTable HashTable;')
@@ -382,30 +388,214 @@ class LLVMBackend:
             self.output_code.append('')
         
     def _gen_function(self, func: FunctionIR):
-        """Generate C function"""
+        """Generate C function from IR"""
+        # Track declared variables for this function
+        self.declared_vars = set()
+        
+        # Add parameters to declared vars
+        for param_name, _ in func.params:
+            self.declared_vars.add(param_name)
+        
+        # Generate function signature
+        return_type = self._map_type_to_c(func.return_type)
+        
+        # Special case for main - always return int
         if func.name == 'main':
-            self.output_code.append('int main() {')
-            for stmt in func.body:
-                # Simple statement translation
-                if stmt.startswith('print(') and stmt.endswith(')'):
-                    # Extract string from print statement
-                    msg = stmt[6:-1]  # Remove 'print(' and ')'
-                    self.output_code.append(f'    printf({msg});')
-                    self.output_code.append(f'    printf("\\n");')
-                else:
-                    # For other statements, output as-is
-                    self.output_code.append(f'    /* TODO: {stmt} */')
+            return_type = 'int'
+        
+        # Build parameter list
+        params_str = ', '.join([
+            f'{self._map_type_to_c(t) if t else "int64_t"} {n}' 
+            for n, t in func.params
+        ]) if func.params else 'void'
+        
+        self.output_code.append(f'{return_type} {func.name}({params_str}) {{')
+        
+        # Generate function body
+        for stmt in func.body:
+            stmt_code = self._gen_stmt(stmt, indent=1)
+            self.output_code.extend(stmt_code)
+        
+        # Add default return for main or void functions
+        if func.name == 'main':
             self.output_code.append('    return 0;')
-            self.output_code.append('}')
-        else:
-            # Handle other functions
-            return_type = self._map_type_to_c(func.return_type)
-            params_str = ', '.join([f'{self._map_type_to_c(t)} {n}' for n, t in func.params])
-            self.output_code.append(f'{return_type} {func.name}({params_str}) {{')
-            for stmt in func.body:
-                self.output_code.append(f'    {stmt}')
-            self.output_code.append('}')
+        
+        self.output_code.append('}')
         self.output_code.append('')
+    
+    def _gen_stmt(self, stmt: StmtIR, indent: int = 0) -> list:
+        """Generate C code for a statement IR node"""
+        ind = '    ' * indent
+        result = []
+        
+        if isinstance(stmt, AssignIR):
+            # Variable assignment
+            expr_code = self._gen_expr(stmt.value)
+            # Check if variable is already declared
+            if stmt.target in self.declared_vars:
+                # Already declared, just assign
+                result.append(f'{ind}{stmt.target} = {expr_code};')
+            else:
+                # First declaration
+                result.append(f'{ind}int64_t {stmt.target} = {expr_code};')
+                self.declared_vars.add(stmt.target)
+        
+        elif isinstance(stmt, ReturnIR):
+            # Return statement
+            if stmt.value:
+                expr_code = self._gen_expr(stmt.value)
+                result.append(f'{ind}return {expr_code};')
+            else:
+                result.append(f'{ind}return;')
+        
+        elif isinstance(stmt, IfIR):
+            # If statement
+            cond_code = self._gen_expr(stmt.condition)
+            result.append(f'{ind}if ({cond_code}) {{')
+            for body_stmt in stmt.then_body:
+                result.extend(self._gen_stmt(body_stmt, indent + 1))
+            
+            # Handle elif
+            for elif_cond, elif_body in stmt.elif_parts:
+                result.append(f'{ind}}} else if ({self._gen_expr(elif_cond)}) {{')
+                for body_stmt in elif_body:
+                    result.extend(self._gen_stmt(body_stmt, indent + 1))
+            
+            # Handle else
+            if stmt.else_body:
+                result.append(f'{ind}}} else {{')
+                for body_stmt in stmt.else_body:
+                    result.extend(self._gen_stmt(body_stmt, indent + 1))
+            
+            result.append(f'{ind}}}')
+        
+        elif isinstance(stmt, WhileIR):
+            # While loop
+            cond_code = self._gen_expr(stmt.condition)
+            result.append(f'{ind}while ({cond_code}) {{')
+            for body_stmt in stmt.body:
+                result.extend(self._gen_stmt(body_stmt, indent + 1))
+            result.append(f'{ind}}}')
+        
+        elif isinstance(stmt, ForIR):
+            # For loop (simplified - assume range-like iteration)
+            iter_code = self._gen_expr(stmt.iter_expr)
+            # For now, handle simple range() calls
+            result.append(f'{ind}/* For loop: for {stmt.target} in {iter_code} */')
+            result.append(f'{ind}/* TODO: Implement full for loop support */')
+        
+        elif isinstance(stmt, ExprStmtIR):
+            # Expression statement (e.g., function call)
+            expr_code = self._gen_expr(stmt.expr)
+            result.append(f'{ind}{expr_code};')
+        
+        return result
+    
+    def _gen_expr(self, expr: ExprIR) -> str:
+        """Generate C code for an expression IR node"""
+        if isinstance(expr, ConstantIR):
+            # Constant value
+            if expr.type_name == 'str':
+                # String literal
+                return f'"{expr.value}"' if not expr.value.startswith('"') else expr.value
+            elif expr.type_name == 'bool':
+                return '1' if expr.value else '0'
+            else:
+                return str(expr.value)
+        
+        elif isinstance(expr, VariableIR):
+            # Variable reference
+            return expr.name
+        
+        elif isinstance(expr, BinOpIR):
+            # Binary operation
+            left_code = self._gen_expr(expr.left)
+            right_code = self._gen_expr(expr.right)
+            
+            # Map operators
+            op_map = {
+                'and': '&&',
+                'or': '||',
+                '**': 'pow',  # Will need to handle specially
+            }
+            op = op_map.get(expr.op, expr.op)
+            
+            if expr.op == '**':
+                # Power operation needs pow() function
+                return f'pow({left_code}, {right_code})'
+            else:
+                return f'({left_code} {op} {right_code})'
+        
+        elif isinstance(expr, UnaryOpIR):
+            # Unary operation
+            operand_code = self._gen_expr(expr.operand)
+            op_map = {
+                'not': '!',
+                '-': '-',
+                '+': '+',
+            }
+            op = op_map.get(expr.op, expr.op)
+            return f'{op}({operand_code})'
+        
+        elif isinstance(expr, CallIR):
+            # Function/method call
+            if expr.is_method:
+                # Method call - for now, treat as function
+                obj_code = self._gen_expr(expr.obj)
+                args_code = ', '.join([self._gen_expr(arg) for arg in expr.args])
+                return f'{obj_code}.{expr.func_name}({args_code})'
+            else:
+                # Regular function call
+                args_code = ', '.join([self._gen_expr(arg) for arg in expr.args])
+                
+                # Map special functions
+                if expr.func_name == 'print':
+                    # Map print to printf with proper formatting
+                    if not expr.args:
+                        return 'printf("\\n")'
+                    
+                    # Build format string and arguments
+                    format_parts = []
+                    args_list = []
+                    for arg in expr.args:
+                        arg_code = self._gen_expr(arg)
+                        # Determine format specifier based on arg type
+                        if isinstance(arg, ConstantIR):
+                            if arg.type_name == 'str':
+                                format_parts.append('%s')
+                                args_list.append(arg_code)
+                            elif arg.type_name == 'int':
+                                format_parts.append('%lld')
+                                args_list.append(arg_code)
+                            elif arg.type_name == 'float':
+                                format_parts.append('%f')
+                                args_list.append(arg_code)
+                            else:
+                                format_parts.append('%s')
+                                args_list.append(arg_code)
+                        elif isinstance(arg, VariableIR):
+                            # Assume int64_t for variables
+                            format_parts.append('%lld')
+                            args_list.append(arg_code)
+                        else:
+                            # Default to int format
+                            format_parts.append('%lld')
+                            args_list.append(arg_code)
+                    
+                    format_str = ' '.join(format_parts)
+                    if args_list:
+                        return f'printf("{format_str}\\n", {", ".join(args_list)})'
+                    else:
+                        return 'printf("\\n")'
+                
+                return f'{expr.func_name}({args_code})'
+        
+        elif isinstance(expr, AttributeIR):
+            # Member access
+            obj_code = self._gen_expr(expr.obj)
+            return f'{obj_code}.{expr.attr}'
+        
+        return '/* unknown expr */'
     
     def _map_type_to_c(self, nagini_type: str) -> str:
         """Map Nagini types to C types"""
