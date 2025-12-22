@@ -47,9 +47,12 @@ class LLVMBackend:
         # Generate built-in types
         self._gen_builtins()
         
-        # Generate class structs
+        # Generate class structs and their methods
         for class_name, class_info in self.ir.classes.items():
             self._gen_class_struct(class_info)
+            # Generate methods for this class
+            for method in class_info.methods:
+                self._gen_class_method(class_info, method)
         
         # Generate functions
         for func in self.ir.functions:
@@ -386,6 +389,48 @@ class LLVMBackend:
             
             self.output_code.append(f'}} {class_info.name};')
             self.output_code.append('')
+    
+    def _gen_class_method(self, class_info: ClassInfo, method_info):
+        """Generate a method for a class"""
+        from .parser import FunctionInfo
+        
+        # Convert FunctionInfo to FunctionIR
+        from .ir import NaginiIR
+        temp_ir = NaginiIR({}, {})
+        method_ir = temp_ir._convert_function_to_ir(method_info)
+        
+        # Track declared variables for this method
+        self.declared_vars = set()
+        
+        # Add self and other parameters to declared vars
+        for param_name, _ in method_ir.params:
+            self.declared_vars.add(param_name)
+        
+        # Generate method signature
+        # Methods take a pointer to the class instance as first parameter
+        return_type = self._map_type_to_c(method_ir.return_type)
+        
+        # Build parameter list with self pointer
+        params_list = [f'{class_info.name}* self']
+        for param_name, param_type in method_ir.params:
+            if param_name != 'self':  # Skip self in params
+                params_list.append(f'{self._map_type_to_c(param_type) if param_type else "int64_t"} {param_name}')
+        
+        params_str = ', '.join(params_list)
+        
+        # Method name is ClassName_methodname
+        method_name = f'{class_info.name}_{method_ir.name}'
+        
+        self.output_code.append(f'/* Method: {class_info.name}.{method_ir.name} */')
+        self.output_code.append(f'{return_type} {method_name}({params_str}) {{')
+        
+        # Generate method body
+        for stmt in method_ir.body:
+            stmt_code = self._gen_stmt(stmt, indent=1)
+            self.output_code.extend(stmt_code)
+        
+        self.output_code.append('}')
+        self.output_code.append('')
         
     def _gen_function(self, func: FunctionIR):
         """Generate C function from IR"""
@@ -593,6 +638,13 @@ class LLVMBackend:
         elif isinstance(expr, AttributeIR):
             # Member access
             obj_code = self._gen_expr(expr.obj)
+            # For now, use simple dot notation
+            # TODO: For object paradigm with hash tables, use ht_get
+            # For data paradigm, use direct member access
+            if obj_code == 'self':
+                # Accessing member on self - for now use comment
+                # In full implementation, would use ht_get for object paradigm
+                return f'self->{expr.attr}  /* TODO: use hash table for object paradigm */'
             return f'{obj_code}.{expr.attr}'
         
         return '/* unknown expr */'

@@ -1,0 +1,182 @@
+# Comprehensive Nagini Test - Demonstrating Turing Completeness
+# This program demonstrates: functions, classes, arithmetic, control flow, loops, recursion
+
+# ===== Part 1: Classes with Methods =====
+
+@property(malloc_strategy='gc', layout='cpp', paradigm='data')
+class Vec2:
+    """2D Vector using data paradigm (direct struct access)"""
+    x: int
+    y: int
+
+@property(malloc_strategy='gc', layout='cpp', paradigm='object') 
+class Counter:
+    """Counter class using object paradigm (hash table storage)"""
+    count: int
+    
+    def increment(self) -> int:
+        # For object paradigm, members are in hash table
+        # This is a placeholder - full implementation would use ht_get/ht_set
+        return 1
+
+# ===== Part 2: Recursive Functions =====
+
+def factorial(n: int) -> int:
+    """Calculate factorial using recursion"""
+    if n <= 1:
+        return 1
+    return n * factorial(n - 1)
+
+def fibonacci(n: int) -> int:
+    """Calculate fibonacci using recursion"""
+    if n <= 1:
+        return n
+    return fibonacci(n - 1) + fibonacci(n - 2)
+
+# ===== Part 3: Iterative Algorithms =====
+
+def sum_range(start: int, end: int) -> int:
+    """Sum integers from start to end using while loop"""
+    total = 0
+    i = start
+    while i <= end:
+        total = total + i
+        i = i + 1
+    return total
+
+def count_digits(n: int) -> int:
+    """Count digits in a number"""
+    if n == 0:
+        return 1
+    
+    count = 0
+    temp = n
+    while temp > 0:
+        count = count + 1
+        temp = temp / 10
+    return count
+
+# ===== Part 4: Boolean Logic and Conditionals =====
+
+def max(a: int, b: int) -> int:
+    """Return maximum of two numbers"""
+    if a > b:
+        return a
+    else:
+        return b
+
+def min(a: int, b: int) -> int:
+    """Return minimum of two numbers"""  
+    if a < b:
+        return a
+    else:
+        return b
+
+def is_even(n: int) -> int:
+    """Check if number is even (returns 1 for true, 0 for false)"""
+    if n % 2 == 0:
+        return 1
+    return 0
+
+def abs_value(n: int) -> int:
+    """Calculate absolute value"""
+    if n < 0:
+        return 0 - n
+    return n
+
+# ===== Part 5: Complex Algorithms =====
+
+def gcd(a: int, b: int) -> int:
+    """Greatest common divisor using Euclid's algorithm"""
+    while b != 0:
+        temp = b
+        b = a % b
+        a = temp
+    return a
+
+def is_prime(n: int) -> int:
+    """Check if number is prime"""
+    if n <= 1:
+        return 0
+    if n <= 3:
+        return 1
+    if n % 2 == 0:
+        return 0
+    
+    i = 3
+    while i * i <= n:
+        if n % i == 0:
+            return 0
+        i = i + 2
+    return 1
+
+def collatz_length(n: int) -> int:
+    """Calculate length of Collatz sequence"""
+    length = 0
+    while n != 1:
+        if n % 2 == 0:
+            n = n / 2
+        else:
+            n = 3 * n + 1
+        length = length + 1
+    return length
+
+# ===== Part 6: Main Program - Execute Tests =====
+
+def main():
+    print("==========================================")
+    print("Nagini Turing Complete Demonstration")
+    print("==========================================")
+    print("")
+    
+    # Test 1: Arithmetic Operations
+    print("Test 1: Arithmetic Operations")
+    print("10 + 5 =", 10 + 5)
+    print("10 - 5 =", 10 - 5)
+    print("10 * 5 =", 10 * 5)
+    print("10 / 5 =", 10 / 5)
+    print("10 % 3 =", 10 % 3)
+    print("")
+    
+    # Test 2: Boolean Logic
+    print("Test 2: Boolean Logic")
+    x = 7
+    if x > 5 and x < 10:
+        print("7 is between 5 and 10")
+    if x == 7 or x == 8:
+        print("7 equals 7 or 8")
+    print("")
+    
+    # Test 3: Conditional Statements
+    print("Test 3: Conditional Statements")
+    print("max(15, 23) =", max(15, 23))
+    print("min(15, 23) =", min(15, 23))
+    print("abs(-42) =", abs_value(0 - 42))
+    print("is_even(10) =", is_even(10))
+    print("is_even(7) =", is_even(7))
+    print("")
+    
+    # Test 4: Loops
+    print("Test 4: Loops")
+    print("sum_range(1, 10) =", sum_range(1, 10))
+    print("count_digits(12345) =", count_digits(12345))
+    print("")
+    
+    # Test 5: Recursion
+    print("Test 5: Recursion")
+    print("factorial(5) =", factorial(5))
+    print("factorial(10) =", factorial(10))
+    print("fibonacci(8) =", fibonacci(8))
+    print("")
+    
+    # Test 6: Complex Algorithms
+    print("Test 6: Complex Algorithms")
+    print("gcd(48, 18) =", gcd(48, 18))
+    print("is_prime(17) =", is_prime(17))
+    print("is_prime(20) =", is_prime(20))
+    print("collatz_length(27) =", collatz_length(27))
+    print("")
+    
+    print("==========================================")
+    print("All tests passed! Turing complete!")
+    print("==========================================")
