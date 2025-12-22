@@ -2,7 +2,7 @@
 # Test script for Nagini compiler
 # Runs all examples and verifies output
 
-set -e
+set -euo pipefail
 
 echo "========================================"
 echo "Nagini Compiler Test Suite"

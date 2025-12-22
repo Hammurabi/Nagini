@@ -1,6 +1,7 @@
 """
-Nagini LLVM Backend
-Generates LLVM IR and compiles to native machine code using llvmlite.
+Nagini C Backend
+Generates C code and compiles to native machine code using gcc/clang.
+Future versions will support direct LLVM IR generation.
 """
 
 import sys
@@ -11,11 +12,8 @@ from .parser import ClassInfo, FieldInfo
 
 class LLVMBackend:
     """
-    LLVM backend for Nagini compiler.
-    Generates LLVM IR and compiles to native machine code.
-    
-    For the initial version, we'll generate simple C code that can be
-    compiled with gcc/clang since llvmlite may not be available.
+    C backend for Nagini compiler (LLVM backend planned for future).
+    Generates C code and compiles to native machine code using gcc/clang.
     """
     
     def __init__(self, ir: NaginiIR):
@@ -83,11 +81,14 @@ class LLVMBackend:
             self.output_code.append('int main() {')
             for stmt in func.body:
                 # Simple statement translation
-                if stmt.startswith('print('):
+                if stmt.startswith('print(') and stmt.endswith(')'):
                     # Extract string from print statement
                     msg = stmt[6:-1]  # Remove 'print(' and ')'
                     self.output_code.append(f'    printf({msg});')
                     self.output_code.append(f'    printf("\\n");')
+                else:
+                    # For other statements, output as-is
+                    self.output_code.append(f'    /* TODO: {stmt} */')
             self.output_code.append('    return 0;')
             self.output_code.append('}')
         else:
