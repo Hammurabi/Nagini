@@ -161,7 +161,13 @@ cython_debug/
 
 # Nagini compiler outputs
 *.c
+*.out
 hello_world
 hello_class_exe
 hello
 hello_class
+memory_example
+test_hello
+test_hello_class
+test_memory
+test_emit.c
