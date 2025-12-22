@@ -19,10 +19,21 @@ class FieldInfo:
 
 
 @dataclass
+class FunctionInfo:
+    """Information about a function definition"""
+    name: str
+    params: List[tuple]  # (name, type_annotation)
+    return_type: Optional[str]
+    body: List[ast.stmt]  # AST statements
+    is_lambda: bool = False
+
+
+@dataclass
 class ClassInfo:
     """Information about a Nagini class"""
     name: str
     fields: List[FieldInfo]
+    methods: List[FunctionInfo]  # Class methods
     malloc_strategy: str = 'gc'   # gc (default), pool, heap
     layout: str = 'cpp'           # cpp, std430, custom
     paradigm: str = 'object'      # object, data
@@ -45,25 +56,30 @@ class NaginiParser:
     
     def __init__(self):
         self.classes: Dict[str, ClassInfo] = {}
+        self.functions: Dict[str, FunctionInfo] = {}
         
-    def parse(self, source_code: str) -> Dict[str, ClassInfo]:
+    def parse(self, source_code: str) -> tuple[Dict[str, ClassInfo], Dict[str, FunctionInfo]]:
         """
-        Parse Nagini source code and extract class information.
+        Parse Nagini source code and extract class and function information.
         
         Args:
             source_code: Nagini source code as string
             
         Returns:
-            Dictionary mapping class names to ClassInfo objects
+            Tuple of (classes dict, functions dict)
         """
         tree = ast.parse(source_code)
         
-        for node in ast.walk(tree):
+        # Parse top-level nodes (not using ast.walk to avoid nested functions)
+        for node in tree.body:
             if isinstance(node, ast.ClassDef):
                 class_info = self._parse_class(node)
                 self.classes[class_info.name] = class_info
+            elif isinstance(node, ast.FunctionDef):
+                func_info = self._parse_function(node)
+                self.functions[func_info.name] = func_info
                 
-        return self.classes
+        return self.classes, self.functions
     
     def _parse_class(self, node: ast.ClassDef) -> ClassInfo:
         """Parse a class definition node"""
@@ -87,8 +103,9 @@ class NaginiParser:
             if isinstance(node.bases[0], ast.Name):
                 parent = node.bases[0].id
         
-        # Extract fields from class body
+        # Extract fields and methods from class body
         fields = []
+        methods = []
         offset = 0
         
         # Add object header for object paradigm
@@ -99,6 +116,7 @@ class NaginiParser:
         
         for item in node.body:
             if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
+                # Field definition
                 field_name = item.target.id
                 type_name = self._extract_type_name(item.annotation)
                 size = self.TYPE_SIZES.get(type_name, 8)
@@ -111,10 +129,15 @@ class NaginiParser:
                 )
                 fields.append(field)
                 offset += size
+            elif isinstance(item, ast.FunctionDef):
+                # Method definition
+                method_info = self._parse_function(item)
+                methods.append(method_info)
         
         return ClassInfo(
             name=node.name,
             fields=fields,
+            methods=methods,
             malloc_strategy=malloc_strategy,
             layout=layout,
             paradigm=paradigm,
@@ -138,3 +161,28 @@ class NaginiParser:
         elif isinstance(annotation, ast.Constant):
             return str(annotation.value)
         return 'unknown'
+    
+    def _parse_function(self, node: ast.FunctionDef) -> FunctionInfo:
+        """Parse a function definition node"""
+        # Extract parameters with type annotations
+        params = []
+        for arg in node.args.args:
+            param_name = arg.arg
+            param_type = None
+            if arg.annotation:
+                param_type = self._extract_type_name(arg.annotation)
+            params.append((param_name, param_type))
+        
+        # Extract return type
+        return_type = None
+        if node.returns:
+            return_type = self._extract_type_name(node.returns)
+        
+        # Store the body as AST statements (will be converted to IR later)
+        return FunctionInfo(
+            name=node.name,
+            params=params,
+            return_type=return_type,
+            body=node.body,
+            is_lambda=False
+        )
