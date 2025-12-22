@@ -172,3 +172,4 @@ test_hello_class
 test_memory
 test_emit.c
 demo_output
+final_demo
