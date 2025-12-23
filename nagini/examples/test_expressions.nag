@@ -9,10 +9,11 @@ def add_strict(a: int, b: int) -> int:
 def add_loose(a, b) -> int:
     return a + b
 
-# Function with *args
+# Function with *args (signature only - full iteration support pending)
 def sum_all(*args) -> int:
     total = 0
-    # TODO: Implement loop over args
+    # NOTE: Full *args iteration not yet implemented
+    # This demonstrates signature parsing only
     return total
 
 # Function with typed and untyped mix

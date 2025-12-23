@@ -183,11 +183,15 @@ class NaginiParser:
         
         # Check for *args
         has_varargs = node.args.vararg is not None
-        varargs_name = node.args.vararg.arg if has_varargs else None
+        varargs_name = None
+        if has_varargs and hasattr(node.args.vararg, 'arg'):
+            varargs_name = node.args.vararg.arg
         
         # Check for **kwargs
         has_kwargs = node.args.kwarg is not None
-        kwargs_name = node.args.kwarg.arg if has_kwargs else None
+        kwargs_name = None
+        if has_kwargs and hasattr(node.args.kwarg, 'arg'):
+            kwargs_name = node.args.kwarg.arg
         
         # Extract return type
         return_type = None

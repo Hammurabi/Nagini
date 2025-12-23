@@ -1,4 +1,6 @@
-# Test constructor calls and member access
+# Test framework for constructor calls and object parameters
+# NOTE: Full constructor call implementation is pending
+# This file tests that functions with object parameters compile correctly
 
 @property(malloc_strategy='gc', layout='cpp', paradigm='object')
 class Point:
@@ -6,22 +8,23 @@ class Point:
     y: int
 
 # Function that takes a Point object (strict typing)
+# Runtime type checking implemented for object parameters
 def distance_squared(p: Point) -> int:
-    # This should verify p is a Point at runtime
-    # For now we'll just return a dummy value since member access needs more work
+    # This would verify p is a Point at runtime if called with objects
+    # Full member access implementation pending
     return 100
 
 # Function with loose object parameter
 def process_any(obj) -> int:
-    # Accepts any object type
+    # Accepts any object type (no type checking)
     return 42
 
 def main():
     # Test that strict typing is tracked
-    # Note: Full constructor calls and member access still need more work
+    # NOTE: Full constructor calls (Point(x, y)) not yet implemented
     
-    # For now, just test that functions with object parameters compile
+    # Test functions with loose parameters compile correctly
     result1 = process_any(123)
     print("Result from loose param:", result1)
     
-    print("Constructor and member access test framework ready")
+    print("Framework ready: strict/loose typing, object parameter signatures")
