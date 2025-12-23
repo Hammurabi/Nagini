@@ -174,3 +174,5 @@ test_emit.c
 demo_output
 final_demo
 object_inheritance
+test_constructors
+test_expressions

@@ -6,7 +6,7 @@ class properties, field information, and allocation strategies.
 
 import ast
 from typing import Dict, List, Optional, Any
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -26,6 +26,11 @@ class FunctionInfo:
     return_type: Optional[str]
     body: List[ast.stmt]  # AST statements
     is_lambda: bool = False
+    has_varargs: bool = False  # *args
+    varargs_name: Optional[str] = None
+    has_kwargs: bool = False  # **kwargs
+    kwargs_name: Optional[str] = None
+    strict_params: List[str] = field(default_factory=list)  # Parameters with type annotations (strict typing)
 
 
 @dataclass
@@ -166,12 +171,27 @@ class NaginiParser:
         """Parse a function definition node"""
         # Extract parameters with type annotations
         params = []
+        strict_params = []  # Track which parameters have type annotations
+        
         for arg in node.args.args:
             param_name = arg.arg
             param_type = None
             if arg.annotation:
                 param_type = self._extract_type_name(arg.annotation)
+                strict_params.append(param_name)  # Has type annotation = strict typing
             params.append((param_name, param_type))
+        
+        # Check for *args
+        has_varargs = node.args.vararg is not None
+        varargs_name = None
+        if has_varargs and hasattr(node.args.vararg, 'arg'):
+            varargs_name = node.args.vararg.arg
+        
+        # Check for **kwargs
+        has_kwargs = node.args.kwarg is not None
+        kwargs_name = None
+        if has_kwargs and hasattr(node.args.kwarg, 'arg'):
+            kwargs_name = node.args.kwarg.arg
         
         # Extract return type
         return_type = None
@@ -184,5 +204,10 @@ class NaginiParser:
             params=params,
             return_type=return_type,
             body=node.body,
-            is_lambda=False
+            is_lambda=False,
+            has_varargs=has_varargs,
+            varargs_name=varargs_name,
+            has_kwargs=has_kwargs,
+            kwargs_name=kwargs_name,
+            strict_params=strict_params
         )

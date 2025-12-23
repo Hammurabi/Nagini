@@ -10,7 +10,8 @@ from .parser import ClassInfo, FieldInfo, FunctionInfo
 from .ir import (
     NaginiIR, FunctionIR, StmtIR, ExprIR,
     ConstantIR, VariableIR, BinOpIR, UnaryOpIR, CallIR, AttributeIR,
-    AssignIR, ReturnIR, IfIR, WhileIR, ForIR, ExprStmtIR
+    AssignIR, ReturnIR, IfIR, WhileIR, ForIR, ExprStmtIR,
+    ConstructorCallIR, LambdaIR, BoxIR, UnboxIR, SubscriptIR
 )
 
 
@@ -44,7 +45,13 @@ class LLVMBackend:
         # Generate base Object class with hash table
         self._gen_base_object()
         
-        # Generate built-in types
+        # Generate symbol table enum FIRST (needed by FunctionObject)
+        self._gen_symbol_table()
+        
+        # Generate FunctionObject (needs symbols)
+        self._gen_function_object()
+        
+        # Generate built-in types (needs symbols)
         self._gen_builtins()
         
         # Generate class structs and their methods
@@ -256,18 +263,72 @@ class LLVMBackend:
         self.output_code.append('}')
         self.output_code.append('')
     
-    def _gen_builtins(self):
-        """Generate built-in types (Int, Double, String, List) using hash table"""
-        # Global symbol table for member names
+    def _gen_symbol_table(self):
+        """Generate global symbol table enum for member names"""
         self.output_code.append('/* Global symbol table for member names */')
         self.output_code.append('enum SymbolIDs {')
         self.output_code.append('    SYM_value = 0,')
         self.output_code.append('    SYM_data = 1,')
         self.output_code.append('    SYM_length = 2,')
-        self.output_code.append('    SYM_capacity = 3')
+        self.output_code.append('    SYM_capacity = 3,')
+        self.output_code.append('    SYM_type_id = 998,      /* Type ID for runtime type checking */')
+        self.output_code.append('    SYM_type_name = 999     /* Type name string for runtime type checking */')
         self.output_code.append('};')
         self.output_code.append('')
+    
+    def _gen_function_object(self):
+        """Generate FunctionObject structure for first-class functions"""
+        self.output_code.append('/* FunctionObject - first-class function representation */')
+        self.output_code.append('typedef struct FunctionObject {')
+        self.output_code.append('    HashTable* hash_table;  /* Inherited from Object */')
+        self.output_code.append('    int64_t __refcount__;   /* Reference counter */')
+        self.output_code.append('    void* func_ptr;         /* Pointer to actual function */')
+        self.output_code.append('    int64_t param_count;    /* Number of parameters */')
+        self.output_code.append('    char** param_names;     /* Parameter names */')
+        self.output_code.append('    char** param_types;     /* Parameter types (NULL for untyped) */')
+        self.output_code.append('    uint8_t* strict_flags;  /* 1 if parameter has strict typing, 0 otherwise */')
+        self.output_code.append('    char* return_type;      /* Return type name */')
+        self.output_code.append('    uint8_t has_varargs;    /* 1 if function accepts *args */')
+        self.output_code.append('    uint8_t has_kwargs;     /* 1 if function accepts **kwargs */')
+        self.output_code.append('} FunctionObject;')
+        self.output_code.append('')
         
+        # Type checking helper function
+        self.output_code.append('/* Runtime type checking for strict parameters */')
+        self.output_code.append('void check_param_type(const char* param_name, void* value, const char* expected_type) {')
+        self.output_code.append('    if (expected_type == NULL) return;  /* Untyped parameter */')
+        self.output_code.append('    /* Get type from object hash table */')
+        self.output_code.append('    Object* obj = (Object*)value;')
+        self.output_code.append('    if (obj == NULL) {')
+        self.output_code.append('        fprintf(stderr, "Runtime Error: Parameter \'%s\' is NULL but expected type \'%s\'\\n", param_name, expected_type);')
+        self.output_code.append('        exit(1);')
+        self.output_code.append('    }')
+        self.output_code.append('    void* type_ptr = ht_get(obj->hash_table, SYM_type_name);')
+        self.output_code.append('    if (type_ptr != NULL) {')
+        self.output_code.append('        char* actual_type = (char*)type_ptr;')
+        self.output_code.append('        if (strcmp(actual_type, expected_type) != 0) {')
+        self.output_code.append('            fprintf(stderr, "Runtime Error: Parameter \'%s\' has type \'%s\' but expected \'%s\'\\n", param_name, actual_type, expected_type);')
+        self.output_code.append('            exit(1);')
+        self.output_code.append('        }')
+        self.output_code.append('    }')
+        self.output_code.append('}')
+        self.output_code.append('')
+        
+        # Argument count checking
+        self.output_code.append('/* Check argument count for function calls */')
+        self.output_code.append('void check_arg_count(const char* func_name, int64_t expected, int64_t actual, uint8_t has_varargs) {')
+        self.output_code.append('    if (!has_varargs && actual != expected) {')
+        self.output_code.append('        fprintf(stderr, "Runtime Error: Function \'%s\' expects %lld arguments but got %lld\\n", func_name, expected, actual);')
+        self.output_code.append('        exit(1);')
+        self.output_code.append('    } else if (has_varargs && actual < expected) {')
+        self.output_code.append('        fprintf(stderr, "Runtime Error: Function \'%s\' expects at least %lld arguments but got %lld\\n", func_name, expected, actual);')
+        self.output_code.append('        exit(1);')
+        self.output_code.append('    }')
+        self.output_code.append('}')
+        self.output_code.append('')
+    
+    def _gen_builtins(self):
+        """Generate built-in types (Int, Double, String, List) using hash table"""
         # Int class (64-bit integer) - stored in hash table
         self.output_code.append('/* Built-in Int class (64-bit integer) */')
         self.output_code.append('/* Members stored in hash_table */')
@@ -279,6 +340,11 @@ class LLVMBackend:
         self.output_code.append('    int64_t* val_ptr = (int64_t*)malloc(sizeof(int64_t));')
         self.output_code.append('    *val_ptr = value;')
         self.output_code.append('    ht_set(obj->hash_table, SYM_value, val_ptr);')
+        self.output_code.append('    /* Store type metadata */')
+        self.output_code.append('    int64_t* type_id = (int64_t*)malloc(sizeof(int64_t));')
+        self.output_code.append('    *type_id = 1;  /* Type ID for Int */')
+        self.output_code.append('    ht_set(obj->hash_table, SYM_type_id, type_id);')
+        self.output_code.append('    ht_set(obj->hash_table, SYM_type_name, strdup("Int"));')
         self.output_code.append('    return obj;')
         self.output_code.append('}')
         self.output_code.append('')
@@ -294,6 +360,11 @@ class LLVMBackend:
         self.output_code.append('    double* val_ptr = (double*)malloc(sizeof(double));')
         self.output_code.append('    *val_ptr = value;')
         self.output_code.append('    ht_set(obj->hash_table, SYM_value, val_ptr);')
+        self.output_code.append('    /* Store type metadata */')
+        self.output_code.append('    int64_t* type_id = (int64_t*)malloc(sizeof(int64_t));')
+        self.output_code.append('    *type_id = 2;  /* Type ID for Double */')
+        self.output_code.append('    ht_set(obj->hash_table, SYM_type_id, type_id);')
+        self.output_code.append('    ht_set(obj->hash_table, SYM_type_name, strdup("Double"));')
         self.output_code.append('    return obj;')
         self.output_code.append('}')
         self.output_code.append('')
@@ -333,6 +404,39 @@ class LLVMBackend:
         self.output_code.append('    ht_set(obj->hash_table, SYM_length, len);')
         self.output_code.append('    ht_set(obj->hash_table, SYM_capacity, cap);')
         self.output_code.append('    return obj;')
+        self.output_code.append('}')
+        self.output_code.append('')
+        
+        # Add boxing/unboxing functions
+        self._gen_boxing_unboxing()
+    
+    def _gen_boxing_unboxing(self):
+        """Generate boxing and unboxing functions for primitive optimization"""
+        self.output_code.append('/* Boxing: Convert primitive int to Int object */')
+        self.output_code.append('Int* box_int(int64_t value) {')
+        self.output_code.append('    return create_int(value);')
+        self.output_code.append('}')
+        self.output_code.append('')
+        
+        self.output_code.append('/* Unboxing: Extract primitive int from Int object */')
+        self.output_code.append('int64_t unbox_int(Int* obj) {')
+        self.output_code.append('    if (obj == NULL) return 0;')
+        self.output_code.append('    int64_t* val_ptr = (int64_t*)ht_get(obj->hash_table, SYM_value);')
+        self.output_code.append('    return val_ptr ? *val_ptr : 0;')
+        self.output_code.append('}')
+        self.output_code.append('')
+        
+        self.output_code.append('/* Boxing: Convert primitive double to Double object */')
+        self.output_code.append('Double* box_double(double value) {')
+        self.output_code.append('    return create_double(value);')
+        self.output_code.append('}')
+        self.output_code.append('')
+        
+        self.output_code.append('/* Unboxing: Extract primitive double from Double object */')
+        self.output_code.append('double unbox_double(Double* obj) {')
+        self.output_code.append('    if (obj == NULL) return 0.0;')
+        self.output_code.append('    double* val_ptr = (double*)ht_get(obj->hash_table, SYM_value);')
+        self.output_code.append('    return val_ptr ? *val_ptr : 0.0;')
         self.output_code.append('}')
         self.output_code.append('')
         
@@ -452,6 +556,16 @@ class LLVMBackend:
         ]) if func.params else 'void'
         
         self.output_code.append(f'{return_type} {func.name}({params_str}) {{')
+        
+        # Add runtime type checks for strict parameters at function entry
+        # Only check for object types (classes), not primitives like int, float, bool, str
+        if func.strict_params:
+            for param_name, param_type in func.params:
+                if param_name in func.strict_params and param_type:
+                    # Check if this is a custom class (not a primitive type)
+                    if param_type not in ['int', 'float', 'bool', 'str', 'void']:
+                        self.output_code.append(f'    /* Runtime type check for strict parameter: {param_name} */')
+                        self.output_code.append(f'    check_param_type("{param_name}", (void*){param_name}, "{param_type}");')
         
         # Generate function body
         for stmt in func.body:
@@ -643,6 +757,45 @@ class LLVMBackend:
                 # Accessing member on a known variable (possibly self)
                 return f'{obj_code}->{expr.attr}  /* TODO: use hash table for object paradigm */'
             return f'{obj_code}.{expr.attr}'
+        
+        elif isinstance(expr, SubscriptIR):
+            # Subscript access (obj[index])
+            obj_code = self._gen_expr(expr.obj)
+            index_code = self._gen_expr(expr.index)
+            return f'{obj_code}[{index_code}]'
+        
+        elif isinstance(expr, ConstructorCallIR):
+            # Constructor call (ClassName(...))
+            # Generate call to create_classname() function
+            func_name = f'create_{expr.class_name.lower()}'
+            args_code = ', '.join([self._gen_expr(arg) for arg in expr.args])
+            return f'{func_name}({args_code})'
+        
+        elif isinstance(expr, LambdaIR):
+            # Lambda expression - generate as inline anonymous function
+            # For now, we'll generate a comment noting lambda support is limited
+            # Full lambda support requires generating a static function and returning a function pointer
+            params_str = ', '.join([f'{name}' for name, _ in expr.params])
+            body_code = self._gen_expr(expr.body)
+            return f'/* lambda({params_str}): {body_code} - TODO: Full lambda support */'
+        
+        elif isinstance(expr, BoxIR):
+            # Box a primitive value into an object
+            inner_code = self._gen_expr(expr.expr)
+            if expr.target_type == 'Int':
+                return f'box_int({inner_code})'
+            elif expr.target_type == 'Double':
+                return f'box_double({inner_code})'
+            return inner_code
+        
+        elif isinstance(expr, UnboxIR):
+            # Unbox an object to a primitive value
+            inner_code = self._gen_expr(expr.expr)
+            if expr.source_type == 'Int':
+                return f'unbox_int({inner_code})'
+            elif expr.source_type == 'Double':
+                return f'unbox_double({inner_code})'
+            return inner_code
         
         return '/* unknown expr */'
     

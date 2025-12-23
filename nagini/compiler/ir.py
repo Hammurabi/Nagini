@@ -5,7 +5,7 @@ Provides an intermediate representation of the Nagini program for code generatio
 
 import ast
 from typing import Dict, List, Optional, Any
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from .parser import ClassInfo, FieldInfo, FunctionInfo
 
 
@@ -48,6 +48,7 @@ class CallIR(ExprIR):
     """Function/method call"""
     func_name: str
     args: List[ExprIR]
+    kwargs: Optional[Dict[str, ExprIR]] = None  # Keyword arguments
     is_method: bool = False
     obj: Optional[ExprIR] = None  # For method calls
 
@@ -64,6 +65,36 @@ class SubscriptIR(ExprIR):
     """Subscript access (obj[key])"""
     obj: ExprIR
     index: ExprIR
+
+
+@dataclass
+class ConstructorCallIR(ExprIR):
+    """Constructor call (ClassName(...))"""
+    class_name: str
+    args: List[ExprIR]
+    kwargs: Optional[Dict[str, ExprIR]] = None
+
+
+@dataclass
+class LambdaIR(ExprIR):
+    """Lambda expression"""
+    params: List[tuple]  # (name, type)
+    body: ExprIR  # Single expression for lambda body
+    capture_vars: List[str] = None  # Variables captured from outer scope
+
+
+@dataclass
+class BoxIR(ExprIR):
+    """Box a primitive value into an object (int -> Int, float -> Double)"""
+    expr: ExprIR
+    target_type: str  # 'Int' or 'Double'
+
+
+@dataclass
+class UnboxIR(ExprIR):
+    """Unbox an object to a primitive value (Int -> int, Double -> float)"""
+    expr: ExprIR
+    source_type: str  # 'Int' or 'Double'
 
 
 @dataclass
@@ -122,6 +153,11 @@ class FunctionIR:
     params: List[tuple]  # (name, type)
     return_type: str
     body: List[StmtIR]  # IR statements
+    has_varargs: bool = False  # *args support
+    varargs_name: Optional[str] = None  # Name of *args parameter
+    has_kwargs: bool = False  # **kwargs support
+    kwargs_name: Optional[str] = None  # Name of **kwargs parameter
+    strict_params: List[str] = field(default_factory=list)  # List of parameter names with strict typing
     
     
 @dataclass
@@ -177,7 +213,12 @@ class NaginiIR:
             name=func_info.name,
             params=func_info.params,
             return_type=func_info.return_type or 'void',
-            body=body_ir
+            body=body_ir,
+            has_varargs=func_info.has_varargs,
+            varargs_name=func_info.varargs_name,
+            has_kwargs=func_info.has_kwargs,
+            kwargs_name=func_info.kwargs_name,
+            strict_params=func_info.strict_params  # No need for 'or []' anymore
         )
     
     def _convert_stmt_to_ir(self, stmt: ast.stmt) -> Optional[StmtIR]:
@@ -305,17 +346,54 @@ class NaginiIR:
             return result
         
         elif isinstance(expr, ast.Call):
-            # Function call
+            # Function call or constructor call
             if isinstance(expr.func, ast.Name):
                 func_name = expr.func.id
                 args = [self._convert_expr_to_ir(arg) for arg in expr.args]
-                return CallIR(func_name, args)
+                
+                # Extract keyword arguments
+                kwargs = {}
+                for keyword in expr.keywords:
+                    if keyword.arg:  # Named keyword argument
+                        kwargs[keyword.arg] = self._convert_expr_to_ir(keyword.value)
+                
+                # Check if it's a constructor call (capitalized name suggests class)
+                if func_name[0].isupper() and func_name in self.classes:
+                    # Constructor call
+                    return ConstructorCallIR(func_name, args, kwargs if kwargs else None)
+                else:
+                    # Regular function call
+                    return CallIR(func_name, args, kwargs if kwargs else None)
             elif isinstance(expr.func, ast.Attribute):
                 # Method call (obj.method())
                 obj = self._convert_expr_to_ir(expr.func.value)
                 method_name = expr.func.attr
                 args = [self._convert_expr_to_ir(arg) for arg in expr.args]
-                return CallIR(method_name, args, is_method=True, obj=obj)
+                
+                # Extract keyword arguments
+                kwargs = {}
+                for keyword in expr.keywords:
+                    if keyword.arg:
+                        kwargs[keyword.arg] = self._convert_expr_to_ir(keyword.value)
+                
+                return CallIR(method_name, args, kwargs if kwargs else None, is_method=True, obj=obj)
+        
+        elif isinstance(expr, ast.Lambda):
+            # Lambda expression
+            params = []
+            for arg in expr.args.args:
+                param_name = arg.arg
+                param_type = None
+                if arg.annotation:
+                    param_type = self._extract_type_name(arg.annotation)
+                params.append((param_name, param_type))
+            
+            # Convert lambda body (single expression)
+            body_expr = self._convert_expr_to_ir(expr.body)
+            
+            # TODO: Detect captured variables from outer scope
+            # For now, we'll leave capture_vars as None
+            return LambdaIR(params, body_expr, None)
         
         elif isinstance(expr, ast.Attribute):
             # Member access
@@ -331,6 +409,14 @@ class NaginiIR:
         # Return a placeholder for unsupported expressions
         # TODO: Add better error handling or warnings for unsupported expression types
         return ConstantIR(0, 'unknown')
+    
+    def _extract_type_name(self, annotation) -> str:
+        """Extract type name from annotation (helper for lambda)"""
+        if isinstance(annotation, ast.Name):
+            return annotation.id
+        elif isinstance(annotation, ast.Constant):
+            return str(annotation.value)
+        return 'unknown'
     
     def _binop_to_str(self, op: ast.operator) -> str:
         """Convert AST binary operator to string"""
