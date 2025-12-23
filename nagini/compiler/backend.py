@@ -45,7 +45,13 @@ class LLVMBackend:
         # Generate base Object class with hash table
         self._gen_base_object()
         
-        # Generate built-in types
+        # Generate symbol table enum FIRST (needed by FunctionObject)
+        self._gen_symbol_table()
+        
+        # Generate FunctionObject (needs symbols)
+        self._gen_function_object()
+        
+        # Generate built-in types (needs symbols)
         self._gen_builtins()
         
         # Generate class structs and their methods
@@ -256,9 +262,19 @@ class LLVMBackend:
         self.output_code.append('    }')
         self.output_code.append('}')
         self.output_code.append('')
-        
-        # Add FunctionObject structure
-        self._gen_function_object()
+    
+    def _gen_symbol_table(self):
+        """Generate global symbol table enum for member names"""
+        self.output_code.append('/* Global symbol table for member names */')
+        self.output_code.append('enum SymbolIDs {')
+        self.output_code.append('    SYM_value = 0,')
+        self.output_code.append('    SYM_data = 1,')
+        self.output_code.append('    SYM_length = 2,')
+        self.output_code.append('    SYM_capacity = 3,')
+        self.output_code.append('    SYM_type_id = 998,      /* Type ID for runtime type checking */')
+        self.output_code.append('    SYM_type_name = 999     /* Type name string for runtime type checking */')
+        self.output_code.append('};')
+        self.output_code.append('')
     
     def _gen_function_object(self):
         """Generate FunctionObject structure for first-class functions"""
@@ -287,7 +303,7 @@ class LLVMBackend:
         self.output_code.append('        fprintf(stderr, "Runtime Error: Parameter \'%s\' is NULL but expected type \'%s\'\\n", param_name, expected_type);')
         self.output_code.append('        exit(1);')
         self.output_code.append('    }')
-        self.output_code.append('    void* type_ptr = ht_get(obj->hash_table, 999);  /* SYM_type_name = 999 */')
+        self.output_code.append('    void* type_ptr = ht_get(obj->hash_table, SYM_type_name);')
         self.output_code.append('    if (type_ptr != NULL) {')
         self.output_code.append('        char* actual_type = (char*)type_ptr;')
         self.output_code.append('        if (strcmp(actual_type, expected_type) != 0) {')
@@ -313,18 +329,6 @@ class LLVMBackend:
     
     def _gen_builtins(self):
         """Generate built-in types (Int, Double, String, List) using hash table"""
-        # Global symbol table for member names
-        self.output_code.append('/* Global symbol table for member names */')
-        self.output_code.append('enum SymbolIDs {')
-        self.output_code.append('    SYM_value = 0,')
-        self.output_code.append('    SYM_data = 1,')
-        self.output_code.append('    SYM_length = 2,')
-        self.output_code.append('    SYM_capacity = 3,')
-        self.output_code.append('    SYM_type_id = 998,      /* Type ID for runtime type checking */')
-        self.output_code.append('    SYM_type_name = 999     /* Type name string for runtime type checking */')
-        self.output_code.append('};')
-        self.output_code.append('')
-        
         # Int class (64-bit integer) - stored in hash table
         self.output_code.append('/* Built-in Int class (64-bit integer) */')
         self.output_code.append('/* Members stored in hash_table */')

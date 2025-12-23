@@ -5,7 +5,7 @@ Provides an intermediate representation of the Nagini program for code generatio
 
 import ast
 from typing import Dict, List, Optional, Any
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from .parser import ClassInfo, FieldInfo, FunctionInfo
 
 
@@ -157,7 +157,7 @@ class FunctionIR:
     varargs_name: Optional[str] = None  # Name of *args parameter
     has_kwargs: bool = False  # **kwargs support
     kwargs_name: Optional[str] = None  # Name of **kwargs parameter
-    strict_params: List[str] = None  # List of parameter names with strict typing
+    strict_params: List[str] = field(default_factory=list)  # List of parameter names with strict typing
     
     
 @dataclass
@@ -218,7 +218,7 @@ class NaginiIR:
             varargs_name=func_info.varargs_name,
             has_kwargs=func_info.has_kwargs,
             kwargs_name=func_info.kwargs_name,
-            strict_params=func_info.strict_params or []
+            strict_params=func_info.strict_params  # No need for 'or []' anymore
         )
     
     def _convert_stmt_to_ir(self, stmt: ast.stmt) -> Optional[StmtIR]:

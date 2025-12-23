@@ -6,7 +6,7 @@ class properties, field information, and allocation strategies.
 
 import ast
 from typing import Dict, List, Optional, Any
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -30,7 +30,7 @@ class FunctionInfo:
     varargs_name: Optional[str] = None
     has_kwargs: bool = False  # **kwargs
     kwargs_name: Optional[str] = None
-    strict_params: List[str] = None  # Parameters with type annotations (strict typing)
+    strict_params: List[str] = field(default_factory=list)  # Parameters with type annotations (strict typing)
 
 
 @dataclass
