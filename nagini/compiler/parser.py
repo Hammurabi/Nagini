@@ -31,6 +31,8 @@ class FunctionInfo:
     has_kwargs: bool = False  # **kwargs
     kwargs_name: Optional[str] = None
     strict_params: List[str] = field(default_factory=list)  # Parameters with type annotations (strict typing)
+    line_no: int = 0  # Line number in source code
+    is_static: bool = False  # Whether the function is static (for methods)
 
 
 @dataclass
@@ -213,5 +215,7 @@ class NaginiParser:
             varargs_name=varargs_name,
             has_kwargs=has_kwargs,
             kwargs_name=kwargs_name,
-            strict_params=strict_params
+            strict_params=strict_params,
+            line_no=node.lineno,
+            is_static=any(isinstance(deco, ast.Name) and deco.id == 'staticmethod' for deco in node.decorator_list)
         )

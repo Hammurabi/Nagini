@@ -33,11 +33,36 @@ typedef enum {
     ALLOC_TYPE_MANUAL = 1
 } AllocationType;
 
-#if defined(__linux__) || defined(__APPLE__) || defined(__unix__) || defined(__darwin__)
+/* Function prototypes that depend on Runtime */
+void* alloc(Runtime* runtime, size_t size, bool* is_manual, int* pool_id, bool zeroed);
+void del(Runtime* runtime, void* ptr, bool is_manual, int pool_id);
+Object* alloc_str(Runtime* runtime, const char* data);
+Object* alloc_int(Runtime* runtime, int64_t value);
+Object* alloc_double(Runtime* runtime, double value);
+Object* alloc_bytes(Runtime* runtime, const char* data, size_t len);
+Object* alloc_function(Runtime* runtime, const char* name, int32_t line, size_t arg_count, void* native_ptr);
+Object* alloc_tuple(Runtime* runtime, size_t size, Object** objects);
+Object* alloc_list(Runtime* runtime);
+Object* alloc_instance(Runtime* runtime);
+Object* alloc_object(Runtime* runtime, int32_t typename);
+Dict* alloc_dict(Runtime* runtime);
+int dict_set(Runtime* runtime, Dict* d, Object* key, Object* value);
+Object* dict_get(Runtime* runtime, Dict* d, Object* key);
+bool dict_del(Runtime* runtime, Dict* d, Object* key);
+void dict_destroy(Runtime* runtime, Dict* d);
+void DECREF(Runtime* runtime, void* obj);
+void* INCREF(void* obj);
+int64_t hash(Runtime* runtime, Object* obj);
+
+#if defined(__linux__) || defined(__unix__)
 void siphash_random_key(uint8_t key[16]) {
     if (getrandom(key, 16, 0) != 16) {
         _exit(1);
     }
+}
+#elif defined(__APPLE__) || defined(__darwin__)
+void siphash_random_key(uint8_t key[16]) {
+    arc4random_buf(key, 16);
 }
 #else
 void siphash_random_key(uint8_t key[16]) {
@@ -412,6 +437,246 @@ void NgDelMember(Runtime* runtime, InstanceObject* instance, StringObject* membe
     dict_del(runtime, dict, (Object*)member);
 }
 
+inline Object* NgAdd(Runtime* runtime, Object* a, Object* b) {
+    // Handle integer addition
+    if (a->__flags__.type == OBJ_TYPE_INT && b->__flags__.type == OBJ_TYPE_INT) {
+        IntObject* int_a = (IntObject*)a;
+        IntObject* int_b = (IntObject*)b;
+        int64_t result = int_a->__value__ + int_b->__value__;
+        return alloc_int(runtime, result);
+    }
+
+    // Handle float addition
+    if ((a->__flags__.type == OBJ_TYPE_FLOAT || a->__flags__.type == OBJ_TYPE_INT) &&
+        (b->__flags__.type == OBJ_TYPE_FLOAT || b->__flags__.type == OBJ_TYPE_INT)) {
+        
+        double val_a = (a->__flags__.type == OBJ_TYPE_FLOAT)
+                        ? ((FloatObject*)a)->__value__
+                        : (double)((IntObject*)a)->__value__;
+        
+        double val_b = (b->__flags__.type == OBJ_TYPE_FLOAT)
+                        ? ((FloatObject*)b)->__value__
+                        : (double)((IntObject*)b)->__value__;
+        
+        double result = val_a + val_b;
+        return alloc_double(runtime, result);
+    }
+
+    // Unsupported types
+    fprintf(stderr,
+        "TypeError: unsupported operand type(s) for +: '%s' and '%s'\n",
+        obj_type_name(a),
+        obj_type_name(b)
+    );
+    exit(1);
+}
+
+inline Object* NgSub(Runtime* runtime, Object* a, Object* b) {
+    // Handle integer subtraction
+    if (a->__flags__.type == OBJ_TYPE_INT && b->__flags__.type == OBJ_TYPE_INT) {
+        IntObject* int_a = (IntObject*)a;
+        IntObject* int_b = (IntObject*)b;
+        int64_t result = int_a->__value__ - int_b->__value__;
+        return alloc_int(runtime, result);
+    }
+
+    // Handle float subtraction
+    if ((a->__flags__.type == OBJ_TYPE_FLOAT || a->__flags__.type == OBJ_TYPE_INT) &&
+        (b->__flags__.type == OBJ_TYPE_FLOAT || b->__flags__.type == OBJ_TYPE_INT)) {
+        
+        double val_a = (a->__flags__.type == OBJ_TYPE_FLOAT)
+                        ? ((FloatObject*)a)->__value__
+                        : (double)((IntObject*)a)->__value__;
+        
+        double val_b = (b->__flags__.type == OBJ_TYPE_FLOAT)
+                        ? ((FloatObject*)b)->__value__
+                        : (double)((IntObject*)b)->__value__;
+        
+        double result = val_a - val_b;
+        return alloc_double(runtime, result);
+    }
+
+    // Unsupported types
+    fprintf(stderr,
+        "TypeError: unsupported operand type(s) for -: '%s' and '%s'\n",
+        obj_type_name(a),
+        obj_type_name(b)
+    );
+    exit(1);
+}
+
+inline Object* NgMul(Runtime* runtime, Object* a, Object* b) {
+    // Handle integer multiplication
+    if (a->__flags__.type == OBJ_TYPE_INT && b->__flags__.type == OBJ_TYPE_INT) {
+        IntObject* int_a = (IntObject*)a;
+        IntObject* int_b = (IntObject*)b;
+        int64_t result = int_a->__value__ * int_b->__value__;
+        return alloc_int(runtime, result);
+    }
+
+    // Handle float multiplication
+    if ((a->__flags__.type == OBJ_TYPE_FLOAT || a->__flags__.type == OBJ_TYPE_INT) &&
+        (b->__flags__.type == OBJ_TYPE_FLOAT || b->__flags__.type == OBJ_TYPE_INT)) {
+        
+        double val_a = (a->__flags__.type == OBJ_TYPE_FLOAT)
+                        ? ((FloatObject*)a)->__value__
+                        : (double)((IntObject*)a)->__value__;
+        
+        double val_b = (b->__flags__.type == OBJ_TYPE_FLOAT)
+                        ? ((FloatObject*)b)->__value__
+                        : (double)((IntObject*)b)->__value__;
+        
+        double result = val_a * val_b;
+        return alloc_double(runtime, result);
+    }
+
+    // Unsupported types
+    fprintf(stderr,
+        "TypeError: unsupported operand type(s) for *: '%s' and '%s'\n",
+        obj_type_name(a),
+        obj_type_name(b)
+    );
+    exit(1);
+}
+
+inline Object* NgTrueDiv(Runtime* runtime, Object* a, Object* b) {
+    // Handle integer division
+    if (a->__flags__.type == OBJ_TYPE_INT && b->__flags__.type == OBJ_TYPE_INT) {
+        IntObject* int_a = (IntObject*)a;
+        IntObject* int_b = (IntObject*)b;
+        if (int_b->__value__ == 0) {
+            fprintf(stderr, "ZeroDivisionError: division by zero\n");
+            exit(1);
+        }
+        double result = (double)int_a->__value__ / (double)int_b->__value__;
+        return alloc_double(runtime, result);
+    }
+
+    // Handle float division
+    if ((a->__flags__.type == OBJ_TYPE_FLOAT || a->__flags__.type == OBJ_TYPE_INT) &&
+        (b->__flags__.type == OBJ_TYPE_FLOAT || b->__flags__.type == OBJ_TYPE_INT)) {
+        
+        double val_a = (a->__flags__.type == OBJ_TYPE_FLOAT)
+                        ? ((FloatObject*)a)->__value__
+                        : (double)((IntObject*)a)->__value__;
+        
+        double val_b = (b->__flags__.type == OBJ_TYPE_FLOAT)
+                        ? ((FloatObject*)b)->__value__
+                        : (double)((IntObject*)b)->__value__;
+        
+        if (val_b == 0.0) {
+            fprintf(stderr, "ZeroDivisionError: division by zero\n");
+            exit(1);
+        }
+        
+        double result = val_a / val_b;
+        return alloc_double(runtime, result);
+    }
+
+    // Unsupported types
+    fprintf(stderr,
+        "TypeError: unsupported operand type(s) for /: '%s' and '%s'\n",
+        obj_type_name(a),
+        obj_type_name(b)
+    );
+    exit(1);
+}
+
+inline Object* NgFloorDiv(Runtime* runtime, Object* a, Object* b) {
+    // Handle integer floor division
+    if (a->__flags__.type == OBJ_TYPE_INT && b->__flags__.type == OBJ_TYPE_INT) {
+        IntObject* int_a = (IntObject*)a;
+        IntObject* int_b = (IntObject*)b;
+        if (int_b->__value__ == 0) {
+            fprintf(stderr, "ZeroDivisionError: division by zero\n");
+            exit(1);
+        }
+        int64_t result = int_a->__value__ / int_b->__value__;
+        if ((int_a->__value__ % int_b->__value__ != 0) &&
+            ((int_a->__value__ < 0) != (int_b->__value__ < 0))) {
+            result -= 1;
+        }
+        return alloc_int(runtime, result);
+    }
+
+    // Handle float floor division
+    if ((a->__flags__.type == OBJ_TYPE_FLOAT || a->__flags__.type == OBJ_TYPE_INT) &&
+        (b->__flags__.type == OBJ_TYPE_FLOAT || b->__flags__.type == OBJ_TYPE_INT)) {
+        
+        double val_a = (a->__flags__.type == OBJ_TYPE_FLOAT)
+                        ? ((FloatObject*)a)->__value__
+                        : (double)((IntObject*)a)->__value__;
+        
+        double val_b = (b->__flags__.type == OBJ_TYPE_FLOAT)
+                        ? ((FloatObject*)b)->__value__
+                        : (double)((IntObject*)b)->__value__;
+        
+        if (val_b == 0.0) {
+            fprintf(stderr, "ZeroDivisionError: division by zero\n");
+            exit(1);
+        }
+        
+        double result = floor(val_a / val_b);
+        return alloc_double(runtime, result);
+    }
+
+    // Unsupported types
+    fprintf(stderr,
+        "TypeError: unsupported operand type(s) for //: '%s' and '%s'\n",
+        obj_type_name(a),
+        obj_type_name(b)
+    );
+    exit(1);
+}
+
+inline Object* NgMod(Runtime* runtime, Object* a, Object* b) {
+    // Handle integer modulo
+    if (a->__flags__.type == OBJ_TYPE_INT && b->__flags__.type == OBJ_TYPE_INT) {
+        IntObject* int_a = (IntObject*)a;
+        IntObject* int_b = (IntObject*)b;
+        if (int_b->__value__ == 0) {
+            fprintf(stderr, "ZeroDivisionError: modulo by zero\n");
+            exit(1);
+        }
+        int64_t result = int_a->__value__ % int_b->__value__;
+        if ((result != 0) && ((int_b->__value__ < 0) != (result < 0))) {
+            result += int_b->__value__;
+        }
+        return alloc_int(runtime, result);
+    }
+
+    // Handle float modulo
+    if ((a->__flags__.type == OBJ_TYPE_FLOAT || a->__flags__.type == OBJ_TYPE_INT) &&
+        (b->__flags__.type == OBJ_TYPE_FLOAT || b->__flags__.type == OBJ_TYPE_INT)) {
+        
+        double val_a = (a->__flags__.type == OBJ_TYPE_FLOAT)
+                        ? ((FloatObject*)a)->__value__
+                        : (double)((IntObject*)a)->__value__;
+        
+        double val_b = (b->__flags__.type == OBJ_TYPE_FLOAT)
+                        ? ((FloatObject*)b)->__value__
+                        : (double)((IntObject*)b)->__value__;
+        
+        if (val_b == 0.0) {
+            fprintf(stderr, "ZeroDivisionError: modulo by zero\n");
+            exit(1);
+        }
+        
+        double result = fmod(val_a, val_b);
+        if ((result != 0.0) && ((val_b < 0.0) != (result < 0.0))) {
+            result += val_b;
+        }
+        return alloc_double(runtime, result);
+    }
+
+    // Unsupported types
+    fprintf(stderr,
+        "TypeError: unsupported operand type(s) for %%: '%s' and '%s'\n",
+        obj_type_name(a),
+        obj_type_name(b)
+    );
+    exit(1);
+}
 
 
 
@@ -638,38 +903,27 @@ typedef struct BuiltinNames {
 
 } BuiltinNames;
 
+typedef struct Constants {
+    Object* integers[CONST_INT_COUNT];
+    Object* floats[CONST_FLOAT_COUNT];
+    Object* strings[CONST_STR_COUNT];
+    Object* bytes[CONST_BYTES_COUNT];
+    Object* bools[CONST_BOOL_COUNT];
+} Constants;
+
 typedef struct Runtime {
     hmap_t*         symbol_table;
+    Constants       constants;
     PoolCollection* pool;
     int64_t         trace_size;
     char*           function_trace[4096];
     uint8_t         siphash_key[16];
     BuiltinNames    builtin_names;
+    Object*         classes;
 } Runtime;
 
-/* Function prototypes that depend on Runtime */
-void* alloc(Runtime* runtime, size_t size, bool* is_manual, int* pool_id, bool zeroed);
-void del(Runtime* runtime, void* ptr, bool is_manual, int pool_id);
-Object* alloc_str(Runtime* runtime, const char* data);
-Object* alloc_int(Runtime* runtime, int64_t value);
-Object* alloc_double(Runtime* runtime, double value);
-Object* alloc_bytes(Runtime* runtime, const char* data, size_t len);
-Object* alloc_function(Runtime* runtime, const char* name, int32_t line, size_t arg_count, void* native_ptr);
-Object* alloc_tuple(Runtime* runtime, size_t size, Object** objects);
-Object* alloc_list(Runtime* runtime);
-Object* alloc_instance(Runtime* runtime);
-Object* alloc_object(Runtime* runtime, int32_t typename);
-Dict* alloc_dict(Runtime* runtime);
-int dict_set(Runtime* runtime, Dict* d, Object* key, Object* value);
-Object* dict_get(Runtime* runtime, Dict* d, Object* key);
-bool dict_del(Runtime* runtime, Dict* d, Object* key);
-void dict_destroy(Runtime* runtime, Dict* d);
-void DECREF(Runtime* runtime, void* obj);
-void* INCREF(void* obj);
-int64_t hash(Runtime* runtime, Object* obj);
-
 Runtime* init_runtime() {
-    runtime = (Runtime*) malloc(sizeof(Runtime));  // Use global runtime directly
+    Runtime* runtime = (Runtime*) malloc(sizeof(Runtime));  // Use global runtime directly
     runtime->symbol_table = hmap_create();
     runtime->pool = (PoolCollection*) malloc(sizeof(PoolCollection));
 
@@ -885,14 +1139,32 @@ Runtime* init_runtime() {
     runtime->builtin_names.__getnewargs_ex__= (StringObject*) alloc_str(runtime, "__getnewargs_ex__");
     runtime->builtin_names.__sizeof__       = (StringObject*) alloc_str(runtime, "__sizeof__");
 
+    runtime->classes = alloc_dict(runtime);
     return runtime;
 }
 
-/* Global runtime instance */
-static Runtime* runtime = NULL;
+int64_t as_int(Object* obj) {
+    if (obj->__flags__.type != OBJ_TYPE_INT) {
+        fprintf(stderr, "TypeError: Expected int object\n");
+        exit(1);
+    }
+    IntObject* int_obj = (IntObject*)obj;
+    return int_obj->__value__;
+}
+
+double as_float(Object* obj) {
+    if (obj->__flags__.type != OBJ_TYPE_FLOAT) {
+        fprintf(stderr, "TypeError: Expected float object\n");
+        exit(1);
+    }
+    FloatObject* float_obj = (FloatObject*)obj;
+    return float_obj->__value__;
+}
+
+
 
 /* Get or create symbol ID for a string */
-int32_t get_symbol_id(const char* name) {
+int32_t get_symbol_id(Runtime* runtime, const char* name) {
     if (!runtime) {
         fprintf(stderr, "Runtime Error: Runtime not initialized\n");
         exit(1);
@@ -954,63 +1226,6 @@ void del(Runtime* runtime, void* ptr, bool is_manual, int pool_id) {
 }
 
 /* Call a function object */
-static inline Object* NgCall(Runtime* runtime, Function* func, Tuple* args, Dict* kwargs) {
-    Object* (*native_func)(Runtime*, Tuple*, Dict*) = (Object* (*)(Runtime*, Tuple*, Dict*))func->native_ptr;
-    return native_func(runtime, args, kwargs);
-}
-
-/* Hash an object */
-static inline int64_t hash(Runtime* runtime, Object* obj) {
-    int32_t obj_type = obj->__flags__.type;
-
-    switch (obj_type) {
-        case OBJ_TYPE_INT: {
-            IntObject* int_obj = (IntObject*)obj;
-            int64_t val = int_obj->__value__;
-            if (val == -1) return -2;
-            return val;
-        }
-        case OBJ_TYPE_FLOAT:
-            return hash_float((FloatObject*)obj);
-        case OBJ_TYPE_TUPLE: {
-            Tuple* tuple = (Tuple*)obj;
-            int64_t h = 17;
-            for (size_t i = 0; i < tuple->size; i++) {
-                h = h * 31 + hash(runtime, tuple->items[i]);
-            }
-            return h;
-        }
-        case OBJ_TYPE_STRING: {
-            StringObject* str_obj = (StringObject*)obj;
-            return str_obj->hash;
-        }
-        case OBJ_TYPE_BYTES: {
-            BytesObject* bytes_obj = (BytesObject*)obj;
-            return bytes_obj->hash;
-        }
-        case OBJ_TYPE_INSTANCE: {
-            InstanceObject* inst = (InstanceObject*)obj;
-            Function* hash_method = (Function*)dict_get(runtime, inst->__dict__, runtime->builtin_names.__hash__);
-            if (hash_method) {
-                Tuple* self_arg = (Tuple*) alloc_tuple(runtime, 1, &obj);
-                Object* result = NgCall(runtime, hash_method, self_arg, NULL);
-                DECREF(runtime, (Object*)self_arg);
-                if (result && result->__flags__.type == OBJ_TYPE_INT) {
-                    IntObject* int_result = (IntObject*) result;
-                    int64_t h = int_result->__value__;
-                    if (h == -1) h = -2;
-                    return h;
-                }
-            }
-
-            return (int64_t)(uintptr_t)obj; // placeholder
-        }
-        default:
-            return (int64_t)(uintptr_t)obj;
-    }
-}
-
-/* NgCall function */
 static inline Object* NgCall(Runtime* runtime, Function* func, Tuple* args, Dict* kwargs) {
     Object* (*native_func)(Runtime*, Tuple*, Dict*) = (Object* (*)(Runtime*, Tuple*, Dict*))func->native_ptr;
     return native_func(runtime, args, kwargs);
@@ -1136,6 +1351,63 @@ static bool _dict_resize(Dict* d, size_t new_capacity) {
     return true;
 }
 
+Object* NgPow(Runtime* runtime, Object* base, Object* exp) {
+
+    // ---- int ** int ----
+    if (base->__flags__.type == OBJ_TYPE_INT &&
+        exp->__flags__.type  == OBJ_TYPE_INT) {
+
+        int64_t b = as_int(base);
+        int64_t e = as_int(exp);
+
+        // Python: negative exponent -> float
+        if (e < 0) {
+            double result = pow((double)b, (double)e);
+            return alloc_float(runtime, result);
+        }
+
+        // Fast integer exponentiation
+        int64_t result = 1;
+        int64_t current = b;
+
+        while (e > 0) {
+            if (e & 1) {
+                result *= current;
+            }
+            current *= current;
+            e >>= 1;
+        }
+
+        return alloc_int(runtime, result);
+    }
+
+    // ---- float involvement ----
+    if ((base->__flags__.type == OBJ_TYPE_FLOAT ||
+         base->__flags__.type == OBJ_TYPE_INT) &&
+        (exp->__flags__.type  == OBJ_TYPE_FLOAT ||
+         exp->__flags__.type  == OBJ_TYPE_INT)) {
+
+        double b = (base->__flags__.type == OBJ_TYPE_FLOAT)
+                    ? as_float(base)
+                    : (double)as_int(base);
+
+        double e = (exp->__flags__.type == OBJ_TYPE_FLOAT)
+                    ? as_float(exp)
+                    : (double)as_int(exp);
+
+        double result = pow(b, e);
+        return alloc_float(runtime, result);
+    }
+
+    // ---- unsupported types ----
+    fprintf(stderr,
+        "TypeError: unsupported operand type(s) for **: '%s' and '%s'\n",
+        obj_type_name(base),
+        obj_type_name(exp)
+    );
+    exit(1);
+}
+
 int dict_set(Runtime* runtime, Dict* d, Object* key, Object* value) {
     if (d->count >= d->threshold) {
         if (!_dict_resize(d, d->capacity * 2)) return -1;
@@ -1242,31 +1514,6 @@ void dict_destroy(Runtime* runtime, Dict* d) {
     free(d);
 }
 
-/* NgMember functions */
-Object* NgGetMember(Runtime* runtime, InstanceObject* instance, StringObject* member) {
-    Dict* dict = instance->__dict__;
-    if (!dict) return NULL;
-
-    return dict_get(runtime, dict, (Object*)member);
-}
-
-void NgSetMember(Runtime* runtime, InstanceObject* instance, StringObject* member, Object* value) {
-    Dict* dict = instance->__dict__;
-    if (!dict) {
-        dict = alloc_dict(runtime);
-        instance->__dict__ = dict;
-    }
-
-    dict_set(runtime, dict, (Object*)member, value);
-}
-
-void NgDelMember(Runtime* runtime, InstanceObject* instance, StringObject* member) {
-    Dict* dict = instance->__dict__;
-    if (!dict) return;
-
-    dict_del(runtime, dict, (Object*)member);
-}
-
 
 /* Create a new Object */
 Object* alloc_object(Runtime* runtime, int32_t typename) {
@@ -1282,7 +1529,7 @@ Object* alloc_object(Runtime* runtime, int32_t typename) {
 /* Create a new Object */
 Object* alloc_instance(Runtime* runtime) {
     InstanceObject* obj = (InstanceObject*) dynamic_pool_alloc(runtime->pool->instance);
-    obj->base.__typename__ = get_symbol_id("object");
+    obj->base.__typename__ = get_symbol_id(runtime, "object");
     obj->base.__refcount__ = 1;
     obj->__dict__ = alloc_dict(runtime);
     obj->base.__allocation__.is_manual = 0;
@@ -1293,7 +1540,7 @@ Object* alloc_instance(Runtime* runtime) {
 
 Object* alloc_int(Runtime* runtime, int64_t value) {
     IntObject* obj = (IntObject*) dynamic_pool_alloc(runtime->pool->ints);
-    obj->base.__typename__ = get_symbol_id("int");
+    obj->base.__typename__ = get_symbol_id(runtime, "int");
     obj->base.__refcount__ = 1;
     obj->__value__ = value;
     obj->base.__allocation__.is_manual = 0;
@@ -1304,7 +1551,7 @@ Object* alloc_int(Runtime* runtime, int64_t value) {
 
 Object* alloc_double(Runtime* runtime, double value) {
     FloatObject* obj = (FloatObject*) dynamic_pool_alloc(runtime->pool->floats);
-    obj->base.__typename__ = get_symbol_id("double");
+    obj->base.__typename__ = get_symbol_id(runtime, "double");
     obj->base.__refcount__ = 1;
     obj->__value__ = value;
     obj->base.__allocation__.is_manual = 0;
@@ -1380,7 +1627,7 @@ Object* alloc_str(Runtime* runtime, const char* data) {
         }
     }
 
-    str_obj->base.base.__typename__ = get_symbol_id("str");
+    str_obj->base.base.__typename__ = get_symbol_id(runtime, "str");
     str_obj->base.base.__refcount__ = 1;
     str_obj->size = real_length;
     str_obj->base.base.__allocation__.is_manual = is_manual ? 1 : 0;
@@ -1397,7 +1644,7 @@ Object* alloc_str(Runtime* runtime, const char* data) {
 Object* alloc_bytes(Runtime* runtime, const char* data, size_t len) {
     BytesObject* bytes_obj = (BytesObject*) malloc(sizeof(BytesObject) + len);
 
-    bytes_obj->base.base.__typename__ = get_symbol_id("bytes");
+    bytes_obj->base.base.__typename__ = get_symbol_id(runtime, "bytes");
     bytes_obj->base.base.__refcount__ = 1;
     bytes_obj->size = len;
     memcpy(bytes_obj->data, data, len);
@@ -1410,7 +1657,7 @@ Object* alloc_bytes(Runtime* runtime, const char* data, size_t len) {
 
 Object* alloc_function(Runtime* runtime, const char* name, int32_t line, size_t arg_count, void* native_ptr) {
     Function* func = (Function*) dynamic_pool_alloc(runtime->pool->functions);
-    func->base.__typename__ = get_symbol_id("function");
+    func->base.__typename__ = get_symbol_id(runtime, "function");
     func->base.__refcount__ = 1;
     func->line = line;
     func->name = strdup(name);
@@ -1425,7 +1672,7 @@ Object* alloc_function(Runtime* runtime, const char* name, int32_t line, size_t 
 Object* alloc_tuple(Runtime* runtime, size_t size, Object** objects) {
     Tuple* tuple = (Tuple*) malloc(sizeof(Tuple) + (size - 1) * sizeof(Object*));
 
-    tuple->base.__typename__ = get_symbol_id("tuple");
+    tuple->base.__typename__ = get_symbol_id(runtime, "tuple");
     tuple->base.__refcount__ = 1;
     tuple->size = size;
     tuple->base.__allocation__.is_manual = 1;
@@ -1440,7 +1687,7 @@ Object* alloc_tuple(Runtime* runtime, size_t size, Object** objects) {
 
 Object* alloc_list(Runtime* runtime) {
     List* list = (List*) dynamic_pool_alloc(runtime->pool->list);
-    list->base.__typename__ = get_symbol_id("list");
+    list->base.__typename__ = get_symbol_id(runtime, "list");
     list->base.__refcount__ = 1;
     list->base.__allocation__.is_manual = 0;
     list->base.__flags__.type = OBJ_TYPE_LIST;

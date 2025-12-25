@@ -180,7 +180,54 @@ class NaginiIR:
         self.top_level_stmts = top_level_stmts
         self.functions: List[FunctionIR] = []
         self.main_body: List[StmtIR] = []
-        
+        self.const_int_count = 0
+        self.const_float_count = 0
+        self.const_str_count = 0
+        self.const_bytes_count = 0
+        self.const_bool_count = 0
+
+        self.const_ints = {}
+        self.const_floats = {}
+        self.const_strs = {}
+        self.const_bytes = {}
+        self.const_bools = {}
+
+    def register_string_constant(self, value: str) -> str:
+        """Register a string constant and return its unique name"""
+        print("Registering string constant:", value)
+        ident = self.const_str_count
+        self.const_strs[ident] = value
+        self.const_str_count += 1
+        return ident
+    
+    def register_int_constant(self, value: int) -> str:
+        """Register an integer constant and return its unique name"""
+        ident = self.const_int_count
+        self.const_ints[ident] = value
+        self.const_int_count += 1
+        return ident
+    
+    def register_float_constant(self, value: float) -> str:
+        """Register a float constant and return its unique name"""
+        ident = self.const_float_count
+        self.const_floats[ident] = value
+        self.const_float_count += 1
+        return ident
+    
+    def register_bytes_constant(self, value: bytes) -> str:
+        """Register a bytes constant and return its unique name"""
+        ident = self.const_bytes_count
+        self.const_bytes[ident] = value
+        self.const_bytes_count += 1
+        return ident
+    
+    def register_bool_constant(self, value: int) -> str:
+        """Register a boolean constant and return its unique name"""
+        ident = self.const_bool_count
+        self.const_bools[ident] = value
+        self.const_bool_count += 1
+        return ident
+    
     def generate(self) -> 'NaginiIR':
         """Generate IR from parsed classes and functions"""
         # Convert parsed functions to IR
@@ -277,7 +324,7 @@ class NaginiIR:
             # Annotated assignment (e.g., x: int = 5)
             if isinstance(stmt.target, ast.Name):
                 target = stmt.target.id
-                value = self._convert_expr_to_ir(stmt.value) if stmt.value else ConstantIR(0, 'int')
+                value = self._convert_expr_to_ir(stmt.value) if stmt.value else ConstantIR(self.register_int_constant(0), 'int')
                 return AssignIR(target, value)
         
         elif isinstance(stmt, ast.Return):
@@ -346,18 +393,26 @@ class NaginiIR:
             value = expr.value
             if isinstance(value, int):
                 type_name = 'int'
+                value = self.register_int_constant(value)
             elif isinstance(value, float):
                 type_name = 'float'
+                value = self.register_float_constant(value)
             elif isinstance(value, bool):
                 type_name = 'bool'
+                self.register_bool_constant(int(value))
             elif isinstance(value, str):
                 type_name = 'str'
+                value = self.register_string_constant(value)
+            elif isinstance(value, bytes):
+                type_name = 'bytes'
+                value = self.register_bytes_constant(value)
             else:
                 type_name = 'unknown'
             return ConstantIR(value, type_name)
         
-        elif isinstance(expr, ast.Name):
-            return VariableIR(expr.id)
+        elif isinstance(expr, ast.Name): # TODO: check if valid
+            ident = self.register_string_constant(expr.id)
+            return ConstantIR(ident, 'str')
         
         elif isinstance(expr, ast.BinOp):
             left = self._convert_expr_to_ir(expr.left)
@@ -441,7 +496,8 @@ class NaginiIR:
         elif isinstance(expr, ast.Attribute):
             # Member access
             obj = self._convert_expr_to_ir(expr.value)
-            return AttributeIR(obj, expr.attr)
+            ident = self.register_string_constant(expr.attr)
+            return AttributeIR(obj, ident)
         
         elif isinstance(expr, ast.Subscript):
             # Subscript access
@@ -451,7 +507,7 @@ class NaginiIR:
         
         # Return a placeholder for unsupported expressions
         # TODO: Add better error handling or warnings for unsupported expression types
-        return ConstantIR(0, 'unknown')
+        raise NotImplementedError(f"Expression type {type(expr)} not supported in IR conversion.")
     
     def _extract_type_name(self, annotation) -> str:
         """Extract type name from annotation (helper for lambda)"""

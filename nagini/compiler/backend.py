@@ -35,16 +35,15 @@ class LLVMBackend:
         self.ir = ir
         self.output_code = []
         self.declared_vars = set()  # Track declared variables
+        self.main_function: Optional[FunctionIR] = None
         
     def generate(self) -> str:
         """
         Generate target code (C for initial implementation).
         Returns the generated C code as a string.
         """
+        print("Generating C code from Nagini IR...")
         self.output_code = []
-        
-        # Generate headers
-        self._gen_headers()
         
         # Generate hash table implementation
         self._gen_hmap()
@@ -63,44 +62,63 @@ class LLVMBackend:
         
         # Generate class structs and their methods
         for class_name, class_info in self.ir.classes.items():
-            self._gen_class_struct(class_info)
             # Generate methods for this class
             for method in class_info.methods:
                 self._gen_class_method(class_info, method)
+            self._gen_class_struct(class_info)
         
         # Generate functions
         for func in self.ir.functions:
             self._gen_function(func)
+
         
+        print("Generating main function...")
+        # generate main function if not present
+        if not self.main_function:
+            raise RuntimeError("No main function defined in the program.")
+        output_code = []
+        # Generate headers
+        self._gen_headers(output_code)
+        self._gen_function(self.main_function)
+        print("C code generation complete.")
+
+        self.output_code = output_code + self.output_code
         return '\n'.join(self.output_code)
     
-    def _gen_headers(self):
+    def _gen_headers(self, output_code):
         """Generate necessary C headers"""
-        self.output_code.append('#include <stdio.h>')
-        self.output_code.append('#include <stdlib.h>')
-        self.output_code.append('#include <stdint.h>')
-        self.output_code.append('#include <string.h>')
-        self.output_code.append('#include <stdbool.h>')
-        self.output_code.append('#include <math.h>')
-        self.output_code.append('#include <assert.h>')
-        self.output_code.append('#include <limits.h>')
+        output_code.append('#include <stdio.h>')
+        output_code.append('#include <stdlib.h>')
+        output_code.append('#include <stdint.h>')
+        output_code.append('#include <string.h>')
+        output_code.append('#include <stdbool.h>')
+        output_code.append('#include <math.h>')
+        output_code.append('#include <assert.h>')
+        output_code.append('#include <limits.h>')
         if sys.platform == 'win32':
-            self.output_code.append('#include <windows.h>')
-            self.output_code.append('#include <bcrypt.h>')
-        else:
-            self.output_code.append('#include <unistd.h>')
-            self.output_code.append('#include <sys/random.h>')
-        self.output_code.append('')
-        self.output_code.append('/* Forward declarations */')
-        self.output_code.append('typedef struct HashTable HashTable;')
-        self.output_code.append('typedef struct Object Object;')
-        self.output_code.append('typedef struct DynamicPool DynamicPool;')
-        self.output_code.append('typedef struct StaticPool StaticPool;')
-        self.output_code.append('typedef struct Dict Dict;')
-        self.output_code.append('typedef struct Runtime Runtime;')
-        self.output_code.append('typedef struct Function Function;')
-        self.output_code.append('typedef struct Set Set;')
-        self.output_code.append('')
+            output_code.append('#include <windows.h>')
+            output_code.append('#include <bcrypt.h>')
+        elif sys.platform == 'linux':
+            output_code.append('#include <unistd.h>')
+            output_code.append('#include <sys/random.h>')
+        output_code.append('')
+        output_code.append('/* Nagini Constants */')
+        output_code.append(f'#define CONST_INT_COUNT {self.ir.const_int_count}')
+        output_code.append(f'#define CONST_FLOAT_COUNT {self.ir.const_float_count}')
+        output_code.append(f'#define CONST_STR_COUNT {self.ir.const_str_count}')
+        output_code.append(f'#define CONST_BYTES_COUNT {self.ir.const_str_count}')
+        output_code.append(f'#define CONST_BOOL_COUNT {self.ir.const_bool_count}')
+        output_code.append('')
+        output_code.append('/* Forward declarations */')
+        output_code.append('typedef struct HashTable HashTable;')
+        output_code.append('typedef struct Object Object;')
+        output_code.append('typedef struct DynamicPool DynamicPool;')
+        output_code.append('typedef struct StaticPool StaticPool;')
+        output_code.append('typedef struct Dict Dict;')
+        output_code.append('typedef struct Runtime Runtime;')
+        output_code.append('typedef struct Function Function;')
+        output_code.append('typedef struct Set Set;')
+        output_code.append('')
     
     def _gen_pools(self):
         self.output_code.append(load_c_from_file('pool.h'))
@@ -134,7 +152,7 @@ class LLVMBackend:
         
         # Type checking helper function
         self.output_code.append('/* Runtime type checking for strict parameters */')
-        self.output_code.append('void check_param_type(const char* param_name, Object* obj, const char* expected_type) {')
+        self.output_code.append('void check_param_type(Runtime* runtime, const char* param_name, Object* obj, const char* expected_type) {')
         self.output_code.append('    if (expected_type == NULL) return;  /* Untyped parameter */')
         self.output_code.append('    if (obj == NULL) {')
         self.output_code.append('        fprintf(stderr, "Runtime Error: Parameter \'%s\' is NULL but expected type \'%s\'\\n", param_name, expected_type);')
@@ -151,7 +169,7 @@ class LLVMBackend:
         
         # Argument count checking
         self.output_code.append('/* Check argument count for function calls */')
-        self.output_code.append('void check_arg_count(const char* func_name, int64_t expected, int64_t actual, uint8_t has_varargs) {')
+        self.output_code.append('void check_arg_count(Runtime* runtime, const char* func_name, int64_t expected, int64_t actual, uint8_t has_varargs) {')
         self.output_code.append('    if (!has_varargs && actual != expected) {')
         self.output_code.append('        fprintf(stderr, "Runtime Error: Function \'%s\' expects %lld arguments but got %lld\\n", func_name, expected, actual);')
         self.output_code.append('        exit(1);')
@@ -172,36 +190,45 @@ class LLVMBackend:
         
         if class_info.paradigm == 'object':
             # Object paradigm uses hash table for members
-            self.output_code.append(f'/* Members stored in hmap, accessed via symbol IDs */')
-            # self.output_code.append(f'typedef Object {class_info.name};')
-            # self.output_code.append('')
-            
-            # Generate constructor function
-            # self.output_code.append(f'{class_info.name}* create_{class_info.name.lower()}() {{')
-            # self.output_code.append(f'    {class_info.name}* obj = create_object();')
-            
-            # # Initialize fields in hash table with default values
-            # for field in class_info.fields:
-            #     self.output_code.append(f'    /* Initialize field: {field.name} */')
-            #     if field.type_name == 'int':
-            #         self.output_code.append(f'    int64_t* {field.name}_ptr = (int64_t*)malloc(sizeof(int64_t));')
-            #         self.output_code.append(f'    *{field.name}_ptr = 0;')
-            #         self.output_code.append(f'    /* hmap_put(obj->hmap, SYM_{field.name}, {field.name}_ptr); */')
-            #     elif field.type_name == 'float':
-            #         self.output_code.append(f'    double* {field.name}_ptr = (double*)malloc(sizeof(double));')
-            #         self.output_code.append(f'    *{field.name}_ptr = 0.0;')
-            #         self.output_code.append(f'    /* hmap_put(obj->hmap, SYM_{field.name}, {field.name}_ptr); */')
-            #     elif field.type_name == 'bool':
-            #         self.output_code.append(f'    uint8_t* {field.name}_ptr = (uint8_t*)malloc(sizeof(uint8_t));')
-            #         self.output_code.append(f'    *{field.name}_ptr = 0;')
-            #         self.output_code.append(f'    /* hmap_put(obj->hmap, SYM_{field.name}, {field.name}_ptr); */')
-            #     elif field.type_name == 'str':
-            #         self.output_code.append(f'    char* {field.name}_ptr = NULL;')
-            #         self.output_code.append(f'    /* hmap_put(obj->hmap, SYM_{field.name}, {field.name}_ptr); */')
-            
-            # self.output_code.append(f'    return obj;')
-            # self.output_code.append(f'}}')
-            # self.output_code.append('')
+            self.output_code.append(f'Object* def_class_{class_info.name}(Runtime* runtime) {{')
+            self.output_code.append(f'    /* Create class {class_info.name} inheriting from {class_info.parent} */')
+            self.output_code.append(f'    Object* cls = alloc_instance("{class_info.name}");')
+            self.output_code.append(f'    /* {class_info.methods} Methods */')
+            num_instance_methods = sum(1 for m in class_info.methods if not m.is_static and m.name != '__init__')
+            current_method_index = 0
+            if num_instance_methods > 0:
+                self.output_code.append(f'    Object* instance_methods[{num_instance_methods}];')
+            has_init = False
+            for field in class_info.methods:
+                self.output_code.append(f'    /* Method: {field.name} */')
+                if field.name == '__init__':
+                    has_init = True
+                    self.output_code.append(f'    {{')
+                    # Object* alloc_function(Runtime* runtime, const char* name, int32_t line, size_t arg_count, void* native_ptr)
+                    self.output_code.append(f'        Object* member_name = alloc_string(runtime, "{field.name}");')
+                    self.output_code.append(f'        Object* member = alloc_function(runtime, "{field.name}", {field.line_no}, {len(field.params)}, (void*)&{class_info.name}_{field.name}_{field.line_no});')
+                    self.output_code.append(f'        NgSetMember(runtime, cls, member_name, member);')
+                    self.output_code.append(f'')
+                    for field2 in class_info.methods:
+                        if field2.name == '__init__' or field2.is_static:
+                            continue
+                        self.output_code.append(f'        /* Initialize method: {field2.name} */')
+                        self.output_code.append(f'        Object* method_str_{field2.name} = alloc_string(runtime, "{field2.name}");')
+                        self.output_code.append(f'        Object* method_{field2.name} = alloc_function(runtime, "{field2.name}", {field2.line_no}, {len(field2.params)}, (void*)&{class_info.name}_{field2.name}_{field2.line_no});')
+                        self.output_code.append(f'        NgSetMember(runtime, cls, method_str_{field2.name}, method_{field2.name});')
+                        # self.output_code.append(f'        /* Initialize field: {field2.name} of type {field2.type_name} */')
+                        # self.output_code.append(f'        Object* field_name = alloc_string(runtime, "{field2.name}");')
+                        # self.output_code.append(f'        Object* default_value = alloc_default_value(runtime, "{field2.type_name}");')
+                        # self.output_code.append(f'        NgSetMember(runtime, cls, field_name, default_value);')
+                    self.output_code.append(f'    }}')
+                elif field.is_static:
+                    self.output_code.append(f'    {{')
+                    self.output_code.append(f'        Object* member_name = alloc_string(runtime, "{field.name}");')
+                    self.output_code.append(f'        Object* member = alloc_function(runtime, "{field.name}", {field.line_no}, {len(field.params)}, (void*)&{class_info.name}_{field.name}_{field.line_no});')
+                    self.output_code.append(f'        NgSetMember(runtime, cls, member_name, member);')
+                    self.output_code.append(f'    }}')
+            self.output_code.append(f'    return cls;')
+            self.output_code.append(f'}}')
         else:
             # Data paradigm uses direct struct (no hash table, no refcount)
             self.output_code.append(f'typedef struct {{')
@@ -219,9 +246,8 @@ class LLVMBackend:
     def _gen_class_method(self, class_info: ClassInfo, method_info: FunctionInfo):
         """Generate a method for a class"""
         # Convert FunctionInfo to FunctionIR
-        temp_ir = NaginiIR({}, {})
+        temp_ir = NaginiIR({}, {}, {})
         method_ir = temp_ir._convert_function_to_ir(method_info)
-        is_constructor = (method_info.name == '__init__')
         
         # Track declared variables for this method
         self.declared_vars = set()
@@ -232,11 +258,11 @@ class LLVMBackend:
         
         # Generate method signature
         # Methods take a pointer to the class instance as first parameter
-        return_type = 'Object*' if is_constructor else self._map_type_to_c(method_ir.return_type)
+        return_type = 'Object*'
         
         # Build parameter list with self pointer
-        params_list = [f'Object* self'] if not is_constructor else []
-        param_types = [class_info.name] if not is_constructor else []
+        params_list = ['Runtime* runtime', f'Object* self'] if not method_info.is_static else ['Runtime* runtime']
+        param_types = [class_info.name]
         for param_name, param_type in method_ir.params:
             if param_name != 'self':  # Skip self in params
                 # params_list.append(f'{self._map_type_to_c(param_type) if param_type else "int64_t"} {param_name}')
@@ -249,12 +275,10 @@ class LLVMBackend:
         self.output_code.append(f'/* Parameter types for method {class_info.name}.{method_ir.name} */')
         # self.output_code.append(f'/* Types: {", ".join(param_types)} */')
         # Method name is ClassName_methodname
-        method_name = f'{class_info.name}_{method_ir.name}'
+        method_name = f'{class_info.name}_{method_ir.name}_{method_info.line_no}'
         
         self.output_code.append(f'/* Method: {class_info.name}.{method_ir.name} */')
         self.output_code.append(f'{return_type} {method_name}({params_str}) {{')
-        if is_constructor:
-            self.output_code.append(f'    Object* self = create_object();')
         
         # Verify hmap_get(self.hmap, symbol_id) against expected types for strict parameters (symbol_id should be of '__typename__' convention)
             
@@ -262,13 +286,20 @@ class LLVMBackend:
         for stmt in method_ir.body:
             stmt_code = self._gen_stmt(stmt, indent=1)
             self.output_code.extend(stmt_code)
-        if is_constructor:
-            self.output_code.append('    return self;')
+
+        # check if return statement is present
+        has_return = any(isinstance(stmt, ReturnIR) for stmt in method_ir.body)
+        if not has_return:
+            self.output_code.append('    return NULL;')
         
         self.output_code.append('}')
         self.output_code.append('')
         
     def _gen_function(self, func: FunctionIR):
+        if func.name == 'main' and not self.main_function:
+            self.main_function = func
+            return
+
         """Generate C function from IR"""
         # Track declared variables for this function
         self.declared_vars = set()
@@ -305,8 +336,34 @@ class LLVMBackend:
         # Init main function body
         if func.name == 'main':
             self.output_code.append('    /* Runtime and Symbol table */')
-            self.output_code.append('    runtime = init_runtime();')
+            self.output_code.append('    Runtime* runtime = init_runtime();')
             self.output_code.append('')
+            self.output_code.append('    /*')
+            self.output_code.append('    total constants:')
+            self.output_code.append(f'      ints: {self.ir.const_int_count}')
+            self.output_code.append(f'      floats: {self.ir.const_float_count}')
+            self.output_code.append(f'      strings: {self.ir.const_str_count}')
+            self.output_code.append(f'      bools: {self.ir.const_bool_count}')
+            self.output_code.append(f'      bytes: {self.ir.const_bytes_count}')
+            self.output_code.append('    */')
+            for k, v in self.ir.const_ints.items():
+                self.output_code.append(f'    runtime->constants.ints[{k}] = {v};')
+            for k, v in self.ir.const_floats.items():
+                self.output_code.append(f'    runtime->constants.floats[{k}] = alloc_float(runtime, {v});')
+            for k, v in self.ir.const_strs.items():
+                self.output_code.append(f'    runtime->constants.strings[{k}] = alloc_string(runtime, "{v}");')
+            for k, v in self.ir.const_bools.items():
+                bool_val = '1' if v else '0'
+                self.output_code.append(f'    runtime->constants.bools[{k}] = {bool_val};')
+            for k, v in self.ir.const_bytes.items():
+                self.output_code.append(f'    runtime->constants.bytes[{k}] = alloc_bytes(runtime, "{v}");')
+            self.output_code.append('')
+            self.output_code.append('    /* Initialize built-in classes and functions */')
+            self.output_code.append('    /* Initialize user-defined classes */')
+            for class_name in self.ir.classes.keys():
+                self.output_code.append(f'    Object* class_{class_name} = def_class_{class_name}(runtime);')
+            for func_name in self.ir.classes.keys():
+                self.output_code.append(f'    dict_set(runtime, runtime->classes, alloc_string(runtime, "{func_name}"), class_{func_name});')
 
         # Generate function body
         for stmt in func.body:
@@ -393,14 +450,18 @@ class LLVMBackend:
     def _gen_expr(self, expr: ExprIR) -> str:
         """Generate C code for an expression IR node"""
         if isinstance(expr, ConstantIR):
-            # Constant value
-            if expr.type_name == 'str':
-                # String literal
-                return f'"{expr.value}"' if not expr.value.startswith('"') else expr.value
+            if expr.type_name == 'int':
+                return f'runtime->constants.integers[{expr.value}]'
+            elif expr.type_name == 'float':
+                return f'runtime->constants.floats[{expr.value}]'
             elif expr.type_name == 'bool':
-                return '1' if expr.value else '0'
+                return f'runtime->constants.bools[{expr.value}]'
+            elif expr.type_name == 'str':
+                return f'runtime->constants.strings[{expr.value}]'
+            elif expr.type_name == 'bytes':
+                return f'runtime->constants.bytes[{expr.value}]'
             else:
-                return str(expr.value)
+                raise ValueError(f'Unknown constant type: {expr.type_name}')
         
         elif isinstance(expr, VariableIR):
             # Variable reference
@@ -418,12 +479,27 @@ class LLVMBackend:
                 '**': 'pow',  # Will need to handle specially
             }
             op = op_map.get(expr.op, expr.op)
+            op_funcs = {
+                '+': 'NgAdd',
+                '-': 'NgSub',
+                '*': 'NgMul',
+                '/': 'NgDiv',
+                '%': 'NgMod',
+                '==': 'NgEq',
+                '!=': 'NgNeq',
+                '<': 'NgLt',
+                '<=': 'NgLeq',
+                '>': 'NgGt',
+                '>=': 'NgGeq',
+                'and': 'NgAnd',
+                'or': 'NgOr',
+            }
             
             if expr.op == '**':
                 # Power operation needs pow() function
-                return f'pow({left_code}, {right_code})'
+                return f'NgPow(runtime, {left_code}, {right_code})'
             else:
-                return f'({left_code} {op} {right_code})'
+                return f'{op_funcs[op]}(runtime, {left_code}, {right_code})'
         
         elif isinstance(expr, UnaryOpIR):
             # Unary operation
@@ -494,11 +570,12 @@ class LLVMBackend:
             obj_code = self._gen_expr(expr.obj)
             # For InstanceObject, use dict_get with the __dict__
             # For now, we'll use a simplified approach
-            if isinstance(expr.obj, VariableIR) and expr.obj.name in self.declared_vars:
+            # if isinstance(expr.obj, VariableIR) and expr.obj.name in self.declared_vars:
                 # Accessing member on a known variable (possibly self)
                 # Cast to InstanceObject and access via __dict__
-                return f'dict_get(runtime, ((InstanceObject*){obj_code})->__dict__, runtime->builtin_names.{expr.attr})'
-            return f'{obj_code}.{expr.attr}'
+                # return f'dict_get(runtime, ((InstanceObject* ){obj_code})->__dict__, runtime->builtin_names.{expr.attr})'
+            return f'NgGetMember(runtime, {obj_code}, runtime->constants.strings[{expr.attr}])'
+            # return f'{obj_code}.{expr.attr}'
         
         elif isinstance(expr, SubscriptIR):
             # Subscript access (obj[index])
