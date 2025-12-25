@@ -100,14 +100,14 @@ class LLVMBackend:
         self.output_code.append('')
     
     def _gen_pools(self):
-        self.output_code.append(load_c_from_file('pool.c'))
+        self.output_code.append(load_c_from_file('pool.h'))
     
     def _gen_hmap(self):
         """Generate hash table implementation for Object members"""
-        self.output_code.append(load_c_from_file('hmap.c'))
+        self.output_code.append(load_c_from_file('hmap.h'))
     
     def _gen_base_object(self):
-        self.output_code.append(load_c_from_file('builtin.c'))
+        self.output_code.append(load_c_from_file('builtin.h'))
     
     def _gen_symbol_table(self):
         pass
