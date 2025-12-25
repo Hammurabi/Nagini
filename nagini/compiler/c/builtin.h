@@ -386,194 +386,7 @@ int64_t hash_float(FloatObject* fobj) {
     return hash;
 }
 
-Dict* alloc_dict(Runtime* runtime) {
-    Dict* d = (Dict*) dynamic_pool_alloc(runtime->pool->dict);
-    if (!d) return NULL;
-
-    // Initialize Base Object (Assuming you have an init function)
-    // object_init((Object*)d, OBJ_TYPE_DICT); 
-    d->base.base.__flags__.type = OBJ_TYPE_DICT;
-    d->base.base.__refcount__ = 1;
-    
-    d->capacity = DICT_INITIAL_CAPACITY;
-    d->count = 0;
-    d->mask = d->capacity - 1;
-    d->threshold = (d->capacity * DICT_LOAD_FACTOR) / 100;
-    
-    bool is_manual = false;
-    int pool_id = 0;
-    d->entries = (dict_entry_t*) alloc(runtime, d->capacity * sizeof(dict_entry_t), &is_manual, &pool_id, true);
-    d->__allocation__.is_manual = is_manual ? 1 : 0;
-    d->__allocation__.pool_id = pool_id;
-    if (!d->entries) {
-        dynamic_pool_free(runtime->pool->dict, d);
-        return NULL;
-    }
-    
-    return d;
-}
-
-static bool _dict_resize(Dict* d, size_t new_capacity) {
-    dict_entry_t* old_entries = d->entries;
-    size_t old_capacity = d->capacity;
-
-    dict_entry_t* new_entries = (dict_entry_t*)calloc(new_capacity, sizeof(dict_entry_t));
-    if (!new_entries) return false;
-
-    d->entries = new_entries;
-    d->capacity = new_capacity;
-    d->mask = new_capacity - 1;
-    d->threshold = (new_capacity * DICT_LOAD_FACTOR) / 100;
-    d->count = 0; // Will re-increment
-
-    for (size_t i = 0; i < old_capacity; ++i) {
-        if (old_entries[i].psl > 0) {
-            dict_entry_t entry = old_entries[i];
-            entry.psl = 1; // Reset PSL
-            
-            size_t idx = (size_t)entry.hash & d->mask;
-            
-            while (true) {
-                if (d->entries[idx].psl == 0) {
-                    d->entries[idx] = entry;
-                    d->count++;
-                    break;
-                }
-                
-                if (entry.psl > d->entries[idx].psl) {
-                    dict_entry_t temp = d->entries[idx];
-                    d->entries[idx] = entry;
-                    entry = temp;
-                }
-                
-                idx = (idx + 1) & d->mask;
-                entry.psl++;
-            }
-        }
-    }
-
-    free(old_entries);
-    return true;
-}
-
-/* Set Item: d[key] = value */
-int dict_set(Runtime* runtime, Dict* d, Object* key, Object* value) {
-    // 1. Check Load Factor
-    if (d->count >= d->threshold) {
-        if (!_dict_resize(d, d->capacity * 2)) return -1;
-    }
-
-    // 2. Compute Hash once
-    int64_t h = hash(runtime, key);
-    size_t idx = (size_t)h & d->mask;
-    uint32_t psl = 1;
-
-    dict_entry_t entry = { .key = key, .value = value, .hash = h, .psl = psl };
-
-    while (true) {
-        dict_entry_t* curr = &d->entries[idx];
-
-        // Case A: Empty Slot -> Insert
-        if (curr->psl == 0) {
-            *curr = entry;
-            d->count++;
-            return 0;
-        }
-
-        // Case B: Key Match -> Update
-        // We check Hash first (fast), then Equality (slower)
-        if (curr->hash == h && ObjectsEqual(curr->key, key)) {
-            curr->value = value;
-            return 0;
-        }
-
-        // Case C: Robin Hood Swap
-        if (entry.psl > curr->psl) {
-            dict_entry_t temp = *curr;
-            *curr = entry;
-            entry = temp;
-        }
-
-        idx = (idx + 1) & d->mask;
-        entry.psl++;
-    }
-}
-
-/* Get Item: value = d[key] */
-Object* dict_get(Runtime* runtime, Dict* d, Object* key) {
-    int64_t h = hash(runtime, key);
-    size_t idx = (size_t)h & d->mask;
-    uint32_t psl = 1;
-
-    while (true) {
-        dict_entry_t* curr = &d->entries[idx];
-
-        if (curr->psl == 0) return NULL; // Not found
-
-        // Optimization: Check hash first, then object equality
-        if (curr->hash == h && ObjectsEqual(curr->key, key)) {
-            return curr->value;
-        }
-
-        // Early Exit optimization
-        if (curr->psl < psl) return NULL;
-
-        idx = (idx + 1) & d->mask;
-        psl++;
-    }
-}
-
-/* Remove Item */
-bool dict_del(Runtime* runtime, Dict* d, Object* key) {
-    int64_t h = hash(runtime, key);
-    size_t idx = (size_t)h & d->mask;
-    uint32_t psl = 1;
-
-    while (true) {
-        dict_entry_t* curr = &d->entries[idx];
-
-        if (curr->psl == 0 || psl > curr->psl) return false;
-
-        if (curr->hash == h && ObjectsEqual(curr->key, key)) {
-            d->count--;
-            // Backward Shift
-            while (true) {
-                size_t next_idx = (idx + 1) & d->mask;
-                dict_entry_t* next = &d->entries[next_idx];
-
-                if (next->psl <= 1) {
-                    d->entries[idx].psl = 0;
-                    d->entries[idx].key = NULL;
-                    d->entries[idx].value = NULL;
-                    break;
-                }
-
-                d->entries[idx] = *next;
-                d->entries[idx].psl--;
-                idx = next_idx;
-            }
-            return true;
-        }
-
-        idx = (idx + 1) & d->mask;
-        psl++;
-    }
-}
-
-void dict_destroy(Runtime* runtime, Dict* d) {
-    if (!d) return;
-
-    // Decrement refcounts for all items
-    for (size_t i = 0; i < d->capacity; i++) {
-        if (d->entries[i].psl > 0) {
-            DECREF(runtime, d->entries[i].key);
-            DECREF(runtime, d->entries[i].value);
-        }
-    }
-    
-    free(d->entries);
-    free(d);
-}
+/* NgMember functions and dict functions - implementations provided after Runtime struct */
 
 Object* NgGetMember(Runtime* runtime, InstanceObject* instance, StringObject* member) {
     Dict* dict = instance->__dict__;
@@ -856,7 +669,7 @@ void* INCREF(void* obj);
 int64_t hash(Runtime* runtime, Object* obj);
 
 Runtime* init_runtime() {
-    Runtime* runtime = (Runtime*) malloc(sizeof(Runtime));
+    runtime = (Runtime*) malloc(sizeof(Runtime));  // Use global runtime directly
     runtime->symbol_table = hmap_create();
     runtime->pool = (PoolCollection*) malloc(sizeof(PoolCollection));
 
@@ -1196,6 +1009,264 @@ static inline int64_t hash(Runtime* runtime, Object* obj) {
             return (int64_t)(uintptr_t)obj;
     }
 }
+
+/* NgCall function */
+static inline Object* NgCall(Runtime* runtime, Function* func, Tuple* args, Dict* kwargs) {
+    Object* (*native_func)(Runtime*, Tuple*, Dict*) = (Object* (*)(Runtime*, Tuple*, Dict*))func->native_ptr;
+    return native_func(runtime, args, kwargs);
+}
+
+/* Hash function */
+int64_t hash(Runtime* runtime, Object* obj) {
+    int32_t obj_type = obj->__flags__.type;
+
+    switch (obj_type) {
+        case OBJ_TYPE_INT: {
+            IntObject* int_obj = (IntObject*)obj;
+            int64_t val = int_obj->__value__;
+            if (val == -1) return -2;
+            return val;
+        }
+        case OBJ_TYPE_FLOAT:
+            return hash_float((FloatObject*)obj);
+        case OBJ_TYPE_TUPLE: {
+            Tuple* tuple = (Tuple*)obj;
+            int64_t h = 17;
+            for (size_t i = 0; i < tuple->size; i++) {
+                h = h * 31 + hash(runtime, tuple->items[i]);
+            }
+            return h;
+        }
+        case OBJ_TYPE_STRING: {
+            StringObject* str_obj = (StringObject*)obj;
+            return str_obj->hash;
+        }
+        case OBJ_TYPE_BYTES: {
+            BytesObject* bytes_obj = (BytesObject*)obj;
+            return bytes_obj->hash;
+        }
+        case OBJ_TYPE_INSTANCE: {
+            InstanceObject* inst = (InstanceObject*)obj;
+            Function* hash_method = (Function*)dict_get(runtime, inst->__dict__, runtime->builtin_names.__hash__);
+            if (hash_method) {
+                Tuple* self_arg = (Tuple*) alloc_tuple(runtime, 1, &obj);
+                Object* result = NgCall(runtime, hash_method, self_arg, NULL);
+                DECREF(runtime, (Object*)self_arg);
+                if (result && result->__flags__.type == OBJ_TYPE_INT) {
+                    IntObject* int_result = (IntObject*) result;
+                    int64_t h = int_result->__value__;
+                    if (h == -1) h = -2;
+                    return h;
+                }
+            }
+
+            return (int64_t)(uintptr_t)obj;
+        }
+        default:
+            return (int64_t)(uintptr_t)obj;
+    }
+}
+
+/* Dict functions */
+Dict* alloc_dict(Runtime* runtime) {
+    Dict* d = (Dict*) dynamic_pool_alloc(runtime->pool->dict);
+    if (!d) return NULL;
+
+    d->base.base.__flags__.type = OBJ_TYPE_DICT;
+    d->base.base.__refcount__ = 1;
+    
+    d->capacity = DICT_INITIAL_CAPACITY;
+    d->count = 0;
+    d->mask = d->capacity - 1;
+    d->threshold = (d->capacity * DICT_LOAD_FACTOR) / 100;
+    
+    bool is_manual = false;
+    int pool_id = 0;
+    d->entries = (dict_entry_t*) alloc(runtime, d->capacity * sizeof(dict_entry_t), &is_manual, &pool_id, true);
+    d->__allocation__.is_manual = is_manual ? 1 : 0;
+    d->__allocation__.pool_id = pool_id;
+    if (!d->entries) {
+        dynamic_pool_free(runtime->pool->dict, d);
+        return NULL;
+    }
+    
+    return d;
+}
+
+static bool _dict_resize(Dict* d, size_t new_capacity) {
+    dict_entry_t* old_entries = d->entries;
+    size_t old_capacity = d->capacity;
+
+    dict_entry_t* new_entries = (dict_entry_t*)calloc(new_capacity, sizeof(dict_entry_t));
+    if (!new_entries) return false;
+
+    d->entries = new_entries;
+    d->capacity = new_capacity;
+    d->mask = new_capacity - 1;
+    d->threshold = (new_capacity * DICT_LOAD_FACTOR) / 100;
+    d->count = 0;
+
+    for (size_t i = 0; i < old_capacity; ++i) {
+        if (old_entries[i].psl > 0) {
+            dict_entry_t entry = old_entries[i];
+            entry.psl = 1;
+            
+            size_t idx = (size_t)entry.hash & d->mask;
+            
+            while (true) {
+                if (d->entries[idx].psl == 0) {
+                    d->entries[idx] = entry;
+                    d->count++;
+                    break;
+                }
+                
+                if (entry.psl > d->entries[idx].psl) {
+                    dict_entry_t temp = d->entries[idx];
+                    d->entries[idx] = entry;
+                    entry = temp;
+                }
+                
+                idx = (idx + 1) & d->mask;
+                entry.psl++;
+            }
+        }
+    }
+
+    free(old_entries);
+    return true;
+}
+
+int dict_set(Runtime* runtime, Dict* d, Object* key, Object* value) {
+    if (d->count >= d->threshold) {
+        if (!_dict_resize(d, d->capacity * 2)) return -1;
+    }
+
+    int64_t h = hash(runtime, key);
+    size_t idx = (size_t)h & d->mask;
+    uint32_t psl = 1;
+
+    dict_entry_t entry = { .key = key, .value = value, .hash = h, .psl = psl };
+
+    while (true) {
+        dict_entry_t* curr = &d->entries[idx];
+
+        if (curr->psl == 0) {
+            *curr = entry;
+            d->count++;
+            return 0;
+        }
+
+        if (curr->hash == h && ObjectsEqual(curr->key, key)) {
+            curr->value = value;
+            return 0;
+        }
+
+        if (entry.psl > curr->psl) {
+            dict_entry_t temp = *curr;
+            *curr = entry;
+            entry = temp;
+        }
+
+        idx = (idx + 1) & d->mask;
+        entry.psl++;
+    }
+}
+
+Object* dict_get(Runtime* runtime, Dict* d, Object* key) {
+    int64_t h = hash(runtime, key);
+    size_t idx = (size_t)h & d->mask;
+    uint32_t psl = 1;
+
+    while (true) {
+        dict_entry_t* curr = &d->entries[idx];
+
+        if (curr->psl == 0) return NULL;
+
+        if (curr->hash == h && ObjectsEqual(curr->key, key)) {
+            return curr->value;
+        }
+
+        if (curr->psl < psl) return NULL;
+
+        idx = (idx + 1) & d->mask;
+        psl++;
+    }
+}
+
+bool dict_del(Runtime* runtime, Dict* d, Object* key) {
+    int64_t h = hash(runtime, key);
+    size_t idx = (size_t)h & d->mask;
+    uint32_t psl = 1;
+
+    while (true) {
+        dict_entry_t* curr = &d->entries[idx];
+
+        if (curr->psl == 0 || psl > curr->psl) return false;
+
+        if (curr->hash == h && ObjectsEqual(curr->key, key)) {
+            d->count--;
+            while (true) {
+                size_t next_idx = (idx + 1) & d->mask;
+                dict_entry_t* next = &d->entries[next_idx];
+
+                if (next->psl <= 1) {
+                    d->entries[idx].psl = 0;
+                    d->entries[idx].key = NULL;
+                    d->entries[idx].value = NULL;
+                    break;
+                }
+
+                d->entries[idx] = *next;
+                d->entries[idx].psl--;
+                idx = next_idx;
+            }
+            return true;
+        }
+
+        idx = (idx + 1) & d->mask;
+        psl++;
+    }
+}
+
+void dict_destroy(Runtime* runtime, Dict* d) {
+    if (!d) return;
+
+    for (size_t i = 0; i < d->capacity; i++) {
+        if (d->entries[i].psl > 0) {
+            DECREF(runtime, d->entries[i].key);
+            DECREF(runtime, d->entries[i].value);
+        }
+    }
+    
+    free(d->entries);
+    free(d);
+}
+
+/* NgMember functions */
+Object* NgGetMember(Runtime* runtime, InstanceObject* instance, StringObject* member) {
+    Dict* dict = instance->__dict__;
+    if (!dict) return NULL;
+
+    return dict_get(runtime, dict, (Object*)member);
+}
+
+void NgSetMember(Runtime* runtime, InstanceObject* instance, StringObject* member, Object* value) {
+    Dict* dict = instance->__dict__;
+    if (!dict) {
+        dict = alloc_dict(runtime);
+        instance->__dict__ = dict;
+    }
+
+    dict_set(runtime, dict, (Object*)member, value);
+}
+
+void NgDelMember(Runtime* runtime, InstanceObject* instance, StringObject* member) {
+    Dict* dict = instance->__dict__;
+    if (!dict) return;
+
+    dict_del(runtime, dict, (Object*)member);
+}
+
 
 /* Create a new Object */
 Object* alloc_object(Runtime* runtime, int32_t typename) {
