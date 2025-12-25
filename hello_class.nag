@@ -1,0 +1,20 @@
+# Nagini Example with Class
+# Demonstrates the @property decorator and class syntax
+
+@property(malloc_strategy='pool', layout='cpp', paradigm='object')
+class Vec3:
+    x: float
+    y: float
+    z: float
+    def __init__(self, x: float, y: float, z: float):
+        self.x = x
+        self.y = y
+        self.z = z
+    def magnitude(self) -> float:
+        return (self.x**2 + self.y**2 + self.z**2) ** 0.5
+
+# The compiler will generate a struct for Vec3 and a main function
+# that prints "Hello, World!"
+
+if __name__ == "__main__":
+    v = Vec3(1.0, 2.0, 3.0)

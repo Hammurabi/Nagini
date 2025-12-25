@@ -176,3 +176,6 @@ final_demo
 object_inheritance
 test_constructors
 test_expressions
+.DS_Store
+.vscode/*
+*.dsYm

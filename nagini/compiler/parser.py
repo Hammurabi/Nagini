@@ -31,6 +31,8 @@ class FunctionInfo:
     has_kwargs: bool = False  # **kwargs
     kwargs_name: Optional[str] = None
     strict_params: List[str] = field(default_factory=list)  # Parameters with type annotations (strict typing)
+    line_no: int = 0  # Line number in source code
+    is_static: bool = False  # Whether the function is static (for methods)
 
 
 @dataclass
@@ -43,6 +45,7 @@ class ClassInfo:
     layout: str = 'cpp'           # cpp, std430, custom
     paradigm: str = 'object'      # object, data
     parent: Optional[str] = 'Object'  # All classes inherit from Object by default
+    name_id: Optional[int] = None  # Unique identifier for the class name
     
     
 class NaginiParser:
@@ -62,16 +65,17 @@ class NaginiParser:
     def __init__(self):
         self.classes: Dict[str, ClassInfo] = {}
         self.functions: Dict[str, FunctionInfo] = {}
+        self.top_level_stmts: List[ast.stmt] = []
         
-    def parse(self, source_code: str) -> tuple[Dict[str, ClassInfo], Dict[str, FunctionInfo]]:
+    def parse(self, source_code: str) -> tuple[Dict[str, ClassInfo], Dict[str, FunctionInfo], List[ast.stmt]]:
         """
-        Parse Nagini source code and extract class and function information.
+        Parse Nagini source code and extract class, function, and top-level statement information.
         
         Args:
             source_code: Nagini source code as string
             
         Returns:
-            Tuple of (classes dict, functions dict)
+            Tuple of (classes dict, functions dict, top-level statements)
         """
         tree = ast.parse(source_code)
         
@@ -83,8 +87,11 @@ class NaginiParser:
             elif isinstance(node, ast.FunctionDef):
                 func_info = self._parse_function(node)
                 self.functions[func_info.name] = func_info
+            else:
+                # Collect top-level statements (assignments, expressions, etc.)
+                self.top_level_stmts.append(node)
 
-        return self.classes, self.functions
+        return self.classes, self.functions, self.top_level_stmts
     
     def _parse_class(self, node: ast.ClassDef) -> ClassInfo:
         """Parse a class definition node"""
@@ -209,5 +216,7 @@ class NaginiParser:
             varargs_name=varargs_name,
             has_kwargs=has_kwargs,
             kwargs_name=kwargs_name,
-            strict_params=strict_params
+            strict_params=strict_params,
+            line_no=node.lineno,
+            is_static=any(isinstance(deco, ast.Name) and deco.id == 'staticmethod' for deco in node.decorator_list)
         )

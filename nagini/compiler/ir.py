@@ -174,22 +174,108 @@ class NaginiIR:
     Transforms parsed AST into a structured IR suitable for code generation.
     """
     
-    def __init__(self, classes: Dict[str, ClassInfo], functions: Dict[str, FunctionInfo]):
+    def __init__(self, classes: Dict[str, ClassInfo], functions: Dict[str, FunctionInfo], top_level_stmts: List[ast.stmt]):
         self.classes = classes
         self.parsed_functions = functions
+        self.top_level_stmts = top_level_stmts
         self.functions: List[FunctionIR] = []
         self.main_body: List[StmtIR] = []
+        self.const_count = 0
+        self.consts = {}
         
+        # Cache for converted methods to avoid double conversion
+        self.method_ir_cache = {}
+
+    def register_string_constant(self, value: str) -> str:
+        """Register a string constant and return its unique name"""
+        print("Registering string constant:", value)
+        ident = self.const_count
+        self.consts[ident] = (f'"{value}"', 'alloc_string')
+        self.const_count += 1
+        return ident
+    
+    def register_int_constant(self, value: int) -> str:
+        """Register an integer constant and return its unique name"""
+        ident = self.const_count
+        self.consts[ident] = (value, 'alloc_int')
+        self.const_count += 1
+        return ident
+    
+    def register_float_constant(self, value: float) -> str:
+        """Register a float constant and return its unique name"""
+        ident = self.const_count
+        self.consts[ident] = (value, 'alloc_float')
+        self.const_count += 1
+        return ident
+    
+    def register_bytes_constant(self, value: bytes) -> str:
+        """Register a bytes constant and return its unique name"""
+        ident = self.const_count
+        self.consts[ident] = (value, 'alloc_bytes')
+        self.const_count += 1
+        return ident
+    
+    def register_bool_constant(self, value: int) -> str:
+        """Register a boolean constant and return its unique name"""
+        ident = self.const_count
+        self.consts[ident] = (value, 'alloc_bool')
+        self.const_count += 1
+        return ident
+    
     def generate(self) -> 'NaginiIR':
         """Generate IR from parsed classes and functions"""
+        # Convert class methods to IR first (to register all constants)
+        for class_name, class_info in self.classes.items():
+            self.classes[class_name].name_id = self.register_string_constant(class_name)
+            for method_info in class_info.methods:
+                # Convert method to IR to register any constants used
+                method_ir = self._convert_function_to_ir(method_info)
+                # Cache the method IR for later use by backend
+                cache_key = (class_name, method_info.name, method_info.line_no)
+                self.method_ir_cache[cache_key] = method_ir
+        
         # Convert parsed functions to IR
         for func_name, func_info in self.parsed_functions.items():
             func_ir = self._convert_function_to_ir(func_info)
             self.functions.append(func_ir)
         
-        # If no main function exists, generate a simple hello world
-        if not any(f.name == 'main' for f in self.functions):
-            raise RuntimeError("No 'main' function defined in the program.")
+        # Check if there's already a main function defined
+        has_main = any(f.name == 'main' for f in self.functions)
+        
+        # If no main function exists, create one from top-level statements
+        if not has_main:
+            if self.top_level_stmts:
+                # Convert top-level statements to IR
+                main_body_ir = []
+                for stmt in self.top_level_stmts:
+                    # Check for 'if __name__ == "__main__"' pattern
+                    if self._is_name_main_check(stmt):
+                        # Extract the body of the if statement
+                        if isinstance(stmt, ast.If):
+                            for body_stmt in stmt.body:
+                                stmt_ir = self._convert_stmt_to_ir(body_stmt)
+                                if stmt_ir:
+                                    main_body_ir.append(stmt_ir)
+                    else:
+                        stmt_ir = self._convert_stmt_to_ir(stmt)
+                        if stmt_ir:
+                            main_body_ir.append(stmt_ir)
+                
+                # Create a synthetic main function
+                main_func = FunctionIR(
+                    name='main',
+                    params=[],
+                    return_type='void',
+                    body=main_body_ir,
+                    has_varargs=False,
+                    varargs_name=None,
+                    has_kwargs=False,
+                    kwargs_name=None,
+                    strict_params=[]
+                )
+                self.functions.append(main_func)
+            else:
+                raise RuntimeError("No 'main' function or top-level statements found in the program.")
         
         return self
     
@@ -213,6 +299,22 @@ class NaginiIR:
             strict_params=func_info.strict_params  # No need for 'or []' anymore
         )
     
+    def _is_name_main_check(self, stmt: ast.stmt) -> bool:
+        """Check if statement is 'if __name__ == "__main__"' pattern"""
+        if not isinstance(stmt, ast.If):
+            return False
+        
+        # Check for comparison: __name__ == "__main__"
+        if isinstance(stmt.test, ast.Compare):
+            left = stmt.test.left
+            if isinstance(left, ast.Name) and left.id == '__name__':
+                if stmt.test.ops and stmt.test.comparators:
+                    if isinstance(stmt.test.ops[0], ast.Eq):
+                        right = stmt.test.comparators[0]
+                        if isinstance(right, ast.Constant) and right.value == "__main__":
+                            return True
+        return False
+    
     def _convert_stmt_to_ir(self, stmt: ast.stmt) -> Optional[StmtIR]:
         """Convert an AST statement to IR"""
         if isinstance(stmt, ast.Assign):
@@ -226,7 +328,7 @@ class NaginiIR:
             # Annotated assignment (e.g., x: int = 5)
             if isinstance(stmt.target, ast.Name):
                 target = stmt.target.id
-                value = self._convert_expr_to_ir(stmt.value) if stmt.value else ConstantIR(0, 'int')
+                value = self._convert_expr_to_ir(stmt.value) if stmt.value else ConstantIR(self.register_int_constant(0), 'int')
                 return AssignIR(target, value)
         
         elif isinstance(stmt, ast.Return):
@@ -295,12 +397,19 @@ class NaginiIR:
             value = expr.value
             if isinstance(value, int):
                 type_name = 'int'
+                value = self.register_int_constant(value)
             elif isinstance(value, float):
                 type_name = 'float'
+                value = self.register_float_constant(value)
             elif isinstance(value, bool):
                 type_name = 'bool'
+                value = self.register_bool_constant(int(value))
             elif isinstance(value, str):
                 type_name = 'str'
+                value = self.register_string_constant(value)
+            elif isinstance(value, bytes):
+                type_name = 'bytes'
+                value = self.register_bytes_constant(value)
             else:
                 type_name = 'unknown'
             return ConstantIR(value, type_name)
@@ -390,7 +499,9 @@ class NaginiIR:
         elif isinstance(expr, ast.Attribute):
             # Member access
             obj = self._convert_expr_to_ir(expr.value)
-            return AttributeIR(obj, expr.attr)
+            # Attribute names need to be string constants for NgGetMember
+            attr_idx = self.register_string_constant(expr.attr)
+            return AttributeIR(obj, attr_idx)
         
         elif isinstance(expr, ast.Subscript):
             # Subscript access
@@ -400,7 +511,7 @@ class NaginiIR:
         
         # Return a placeholder for unsupported expressions
         # TODO: Add better error handling or warnings for unsupported expression types
-        return ConstantIR(0, 'unknown')
+        raise NotImplementedError(f"Expression type {type(expr)} not supported in IR conversion.")
     
     def _extract_type_name(self, annotation) -> str:
         """Extract type name from annotation (helper for lambda)"""
