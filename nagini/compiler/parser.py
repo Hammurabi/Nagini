@@ -83,7 +83,7 @@ class NaginiParser:
             elif isinstance(node, ast.FunctionDef):
                 func_info = self._parse_function(node)
                 self.functions[func_info.name] = func_info
-                
+
         return self.classes, self.functions
     
     def _parse_class(self, node: ast.ClassDef) -> ClassInfo:

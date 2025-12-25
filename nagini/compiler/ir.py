@@ -189,15 +189,7 @@ class NaginiIR:
         
         # If no main function exists, generate a simple hello world
         if not any(f.name == 'main' for f in self.functions):
-            main_func = FunctionIR(
-                name='main',
-                params=[],
-                return_type='int',
-                body=[
-                    ExprStmtIR(CallIR('printf', [ConstantIR('"Hello, World!"', 'str')]))
-                ]
-            )
-            self.functions.append(main_func)
+            raise RuntimeError("No 'main' function defined in the program.")
         
         return self
     
