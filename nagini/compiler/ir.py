@@ -174,9 +174,10 @@ class NaginiIR:
     Transforms parsed AST into a structured IR suitable for code generation.
     """
     
-    def __init__(self, classes: Dict[str, ClassInfo], functions: Dict[str, FunctionInfo]):
+    def __init__(self, classes: Dict[str, ClassInfo], functions: Dict[str, FunctionInfo], top_level_stmts: List[ast.stmt]):
         self.classes = classes
         self.parsed_functions = functions
+        self.top_level_stmts = top_level_stmts
         self.functions: List[FunctionIR] = []
         self.main_body: List[StmtIR] = []
         
@@ -187,9 +188,43 @@ class NaginiIR:
             func_ir = self._convert_function_to_ir(func_info)
             self.functions.append(func_ir)
         
-        # If no main function exists, generate a simple hello world
-        if not any(f.name == 'main' for f in self.functions):
-            raise RuntimeError("No 'main' function defined in the program.")
+        # Check if there's already a main function defined
+        has_main = any(f.name == 'main' for f in self.functions)
+        
+        # If no main function exists, create one from top-level statements
+        if not has_main:
+            if self.top_level_stmts:
+                # Convert top-level statements to IR
+                main_body_ir = []
+                for stmt in self.top_level_stmts:
+                    # Check for 'if __name__ == "__main__"' pattern
+                    if self._is_name_main_check(stmt):
+                        # Extract the body of the if statement
+                        if isinstance(stmt, ast.If):
+                            for body_stmt in stmt.body:
+                                stmt_ir = self._convert_stmt_to_ir(body_stmt)
+                                if stmt_ir:
+                                    main_body_ir.append(stmt_ir)
+                    else:
+                        stmt_ir = self._convert_stmt_to_ir(stmt)
+                        if stmt_ir:
+                            main_body_ir.append(stmt_ir)
+                
+                # Create a synthetic main function
+                main_func = FunctionIR(
+                    name='main',
+                    params=[],
+                    return_type='void',
+                    body=main_body_ir,
+                    has_varargs=False,
+                    varargs_name=None,
+                    has_kwargs=False,
+                    kwargs_name=None,
+                    strict_params=[]
+                )
+                self.functions.append(main_func)
+            else:
+                raise RuntimeError("No 'main' function or top-level statements found in the program.")
         
         return self
     
@@ -212,6 +247,22 @@ class NaginiIR:
             kwargs_name=func_info.kwargs_name,
             strict_params=func_info.strict_params  # No need for 'or []' anymore
         )
+    
+    def _is_name_main_check(self, stmt: ast.stmt) -> bool:
+        """Check if statement is 'if __name__ == "__main__"' pattern"""
+        if not isinstance(stmt, ast.If):
+            return False
+        
+        # Check for comparison: __name__ == "__main__"
+        if isinstance(stmt.test, ast.Compare):
+            left = stmt.test.left
+            if isinstance(left, ast.Name) and left.id == '__name__':
+                if stmt.test.ops and stmt.test.comparators:
+                    if isinstance(stmt.test.ops[0], ast.Eq):
+                        right = stmt.test.comparators[0]
+                        if isinstance(right, ast.Constant) and right.value == "__main__":
+                            return True
+        return False
     
     def _convert_stmt_to_ir(self, stmt: ast.stmt) -> Optional[StmtIR]:
         """Convert an AST statement to IR"""

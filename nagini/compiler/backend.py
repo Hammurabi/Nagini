@@ -97,6 +97,9 @@ class LLVMBackend:
         self.output_code.append('typedef struct DynamicPool DynamicPool;')
         self.output_code.append('typedef struct StaticPool StaticPool;')
         self.output_code.append('typedef struct Dict Dict;')
+        self.output_code.append('typedef struct Runtime Runtime;')
+        self.output_code.append('typedef struct Function Function;')
+        self.output_code.append('typedef struct Set Set;')
         self.output_code.append('')
     
     def _gen_pools(self):
@@ -133,18 +136,15 @@ class LLVMBackend:
         self.output_code.append('/* Runtime type checking for strict parameters */')
         self.output_code.append('void check_param_type(const char* param_name, Object* obj, const char* expected_type) {')
         self.output_code.append('    if (expected_type == NULL) return;  /* Untyped parameter */')
-        self.output_code.append('    /* Get type from object hash table */')
         self.output_code.append('    if (obj == NULL) {')
         self.output_code.append('        fprintf(stderr, "Runtime Error: Parameter \'%s\' is NULL but expected type \'%s\'\\n", param_name, expected_type);')
         self.output_code.append('        exit(1);')
         self.output_code.append('    }')
-        self.output_code.append('    void* type_ptr = hmap_get(obj->hmap, get_symbol_id("__typename__"));')
-        self.output_code.append('    if (type_ptr != NULL) {')
-        self.output_code.append('        char* actual_type = (char*)type_ptr;')
-        self.output_code.append('        if (strcmp(actual_type, expected_type) != 0) {')
-        self.output_code.append('            fprintf(stderr, "Runtime Error: Parameter \'%s\' has type \'%s\' but expected \'%s\'\\n", param_name, actual_type, expected_type);')
-        self.output_code.append('            exit(1);')
-        self.output_code.append('        }')
+        self.output_code.append('    /* Get type name from symbol table using typename ID */')
+        self.output_code.append('    char* actual_type = (char*)hmap_get(runtime->symbol_table, obj->__typename__);')
+        self.output_code.append('    if (actual_type != NULL && strcmp(actual_type, expected_type) != 0) {')
+        self.output_code.append('        fprintf(stderr, "Runtime Error: Parameter \'%s\' has type \'%s\' but expected \'%s\'\\n", param_name, actual_type, expected_type);')
+        self.output_code.append('        exit(1);')
         self.output_code.append('    }')
         self.output_code.append('}')
         self.output_code.append('')
@@ -305,7 +305,7 @@ class LLVMBackend:
         # Init main function body
         if func.name == 'main':
             self.output_code.append('    /* Runtime and Symbol table */')
-            self.output_code.append('    init_runtime();')
+            self.output_code.append('    runtime = init_runtime();')
             self.output_code.append('')
 
         # Generate function body
@@ -492,14 +492,12 @@ class LLVMBackend:
         elif isinstance(expr, AttributeIR):
             # Member access
             obj_code = self._gen_expr(expr.obj)
-            # Check if accessing self (parameter names tracked in declared_vars)
-            # For now use simple dot notation
-            # TODO: For object paradigm with hash tables, use hmap_get
-            # For data paradigm, use direct member access
+            # For InstanceObject, use dict_get with the __dict__
+            # For now, we'll use a simplified approach
             if isinstance(expr.obj, VariableIR) and expr.obj.name in self.declared_vars:
                 # Accessing member on a known variable (possibly self)
-                # return f'{obj_code}->{expr.attr}  /* TODO: use hash table for object paradigm */'
-                return f'(Object*) hmap_get({obj_code}->hmap, get_symbol_id("{expr.attr}"))'
+                # Cast to InstanceObject and access via __dict__
+                return f'dict_get(runtime, ((InstanceObject*){obj_code})->__dict__, runtime->builtin_names.{expr.attr})'
             return f'{obj_code}.{expr.attr}'
         
         elif isinstance(expr, SubscriptIR):

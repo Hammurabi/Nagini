@@ -62,16 +62,17 @@ class NaginiParser:
     def __init__(self):
         self.classes: Dict[str, ClassInfo] = {}
         self.functions: Dict[str, FunctionInfo] = {}
+        self.top_level_stmts: List[ast.stmt] = []
         
-    def parse(self, source_code: str) -> tuple[Dict[str, ClassInfo], Dict[str, FunctionInfo]]:
+    def parse(self, source_code: str) -> tuple[Dict[str, ClassInfo], Dict[str, FunctionInfo], List[ast.stmt]]:
         """
-        Parse Nagini source code and extract class and function information.
+        Parse Nagini source code and extract class, function, and top-level statement information.
         
         Args:
             source_code: Nagini source code as string
             
         Returns:
-            Tuple of (classes dict, functions dict)
+            Tuple of (classes dict, functions dict, top-level statements)
         """
         tree = ast.parse(source_code)
         
@@ -83,8 +84,11 @@ class NaginiParser:
             elif isinstance(node, ast.FunctionDef):
                 func_info = self._parse_function(node)
                 self.functions[func_info.name] = func_info
+            else:
+                # Collect top-level statements (assignments, expressions, etc.)
+                self.top_level_stmts.append(node)
 
-        return self.classes, self.functions
+        return self.classes, self.functions, self.top_level_stmts
     
     def _parse_class(self, node: ast.ClassDef) -> ClassInfo:
         """Parse a class definition node"""

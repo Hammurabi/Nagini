@@ -4,6 +4,11 @@
  * Bits 5-7   : reserved (3 bits)
  */
 
+/* Forward declarations */
+typedef struct Runtime Runtime;
+typedef struct Function Function;
+typedef struct Set Set;
+
 /* Masks */
 #define OBJ_ALLOC_MASK    0x01  // 0000 0001
 #define OBJ_TYPE_MASK     0x1E  // 0001 1110
@@ -1153,6 +1158,32 @@ Runtime* init_runtime() {
     runtime->builtin_names.__sizeof__       = (StringObject*) alloc_str(runtime, "__sizeof__");
 
     return runtime;
+}
+
+/* Global runtime instance */
+static Runtime* runtime = NULL;
+
+/* Get or create symbol ID for a string */
+int32_t get_symbol_id(const char* name) {
+    if (!runtime) {
+        fprintf(stderr, "Runtime Error: Runtime not initialized\n");
+        exit(1);
+    }
+    
+    // Hash the string name
+    uint64_t hash = siphash_cstr(name, runtime->siphash_key);
+    int64_t key = (int64_t)hash;
+    
+    // Check if symbol already exists
+    void* existing = hmap_get(runtime->symbol_table, key);
+    if (existing != NULL) {
+        return key;
+    }
+    
+    // Add new symbol
+    char* name_copy = strdup(name);
+    hmap_put(runtime->symbol_table, key, name_copy);
+    return key;
 }
 
 /* Create a new Object */

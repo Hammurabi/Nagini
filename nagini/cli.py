@@ -38,7 +38,7 @@ def compile_file(input_file: str, output_file: str = None, emit_c: bool = False,
     if verbose:
         print("Phase 1: Parsing AST...")
     parser = NaginiParser()
-    classes, functions = parser.parse(source_code)
+    classes, functions, top_level_stmts = parser.parse(source_code)
     
     if verbose:
         print(f"  Found {len(classes)} class(es)")
@@ -47,11 +47,12 @@ def compile_file(input_file: str, output_file: str = None, emit_c: bool = False,
         print(f"  Found {len(functions)} function(s)")
         for name, info in functions.items():
             print(f"    - {name}: {len(info.params)} param(s), returns {info.return_type}")
+        print(f"  Found {len(top_level_stmts)} top-level statement(s)")
     
     # Phase 2: Generate IR
     if verbose:
         print("Phase 2: Generating IR...")
-    ir = NaginiIR(classes, functions)
+    ir = NaginiIR(classes, functions, top_level_stmts)
     ir.generate()
     
     # Phase 3: Backend code generation
