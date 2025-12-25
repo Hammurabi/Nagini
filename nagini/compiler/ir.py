@@ -191,6 +191,9 @@ class NaginiIR:
         self.const_strs = {}
         self.const_bytes = {}
         self.const_bools = {}
+        
+        # Cache for converted methods to avoid double conversion
+        self.method_ir_cache = {}
 
     def register_string_constant(self, value: str) -> str:
         """Register a string constant and return its unique name"""
@@ -230,6 +233,15 @@ class NaginiIR:
     
     def generate(self) -> 'NaginiIR':
         """Generate IR from parsed classes and functions"""
+        # Convert class methods to IR first (to register all constants)
+        for class_name, class_info in self.classes.items():
+            for method_info in class_info.methods:
+                # Convert method to IR to register any constants used
+                method_ir = self._convert_function_to_ir(method_info)
+                # Cache the method IR for later use by backend
+                cache_key = (class_name, method_info.name, method_info.line_no)
+                self.method_ir_cache[cache_key] = method_ir
+        
         # Convert parsed functions to IR
         for func_name, func_info in self.parsed_functions.items():
             func_ir = self._convert_function_to_ir(func_info)
@@ -495,7 +507,9 @@ class NaginiIR:
         elif isinstance(expr, ast.Attribute):
             # Member access
             obj = self._convert_expr_to_ir(expr.value)
-            return AttributeIR(obj, expr.attr)
+            # Attribute names need to be string constants for NgGetMember
+            attr_idx = self.register_string_constant(expr.attr)
+            return AttributeIR(obj, attr_idx)
         
         elif isinstance(expr, ast.Subscript):
             # Subscript access

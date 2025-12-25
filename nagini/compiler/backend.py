@@ -245,9 +245,13 @@ class LLVMBackend:
     
     def _gen_class_method(self, class_info: ClassInfo, method_info: FunctionInfo):
         """Generate a method for a class"""
-        # Convert FunctionInfo to FunctionIR
-        temp_ir = NaginiIR({}, {}, {})
-        method_ir = temp_ir._convert_function_to_ir(method_info)
+        # Get the cached method IR (already converted during IR generation)
+        cache_key = (class_info.name, method_info.name, method_info.line_no)
+        if cache_key in self.ir.method_ir_cache:
+            method_ir = self.ir.method_ir_cache[cache_key]
+        else:
+            # Fallback: convert if not in cache (shouldn't happen)
+            method_ir = self.ir._convert_function_to_ir(method_info)
         
         # Track declared variables for this method
         self.declared_vars = set()
