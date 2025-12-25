@@ -399,7 +399,7 @@ class NaginiIR:
                 value = self.register_float_constant(value)
             elif isinstance(value, bool):
                 type_name = 'bool'
-                self.register_bool_constant(int(value))
+                value = self.register_bool_constant(int(value))
             elif isinstance(value, str):
                 type_name = 'str'
                 value = self.register_string_constant(value)
@@ -410,9 +410,8 @@ class NaginiIR:
                 type_name = 'unknown'
             return ConstantIR(value, type_name)
         
-        elif isinstance(expr, ast.Name): # TODO: check if valid
-            ident = self.register_string_constant(expr.id)
-            return ConstantIR(ident, 'str')
+        elif isinstance(expr, ast.Name):
+            return VariableIR(expr.id)
         
         elif isinstance(expr, ast.BinOp):
             left = self._convert_expr_to_ir(expr.left)
@@ -496,8 +495,7 @@ class NaginiIR:
         elif isinstance(expr, ast.Attribute):
             # Member access
             obj = self._convert_expr_to_ir(expr.value)
-            ident = self.register_string_constant(expr.attr)
-            return AttributeIR(obj, ident)
+            return AttributeIR(obj, expr.attr)
         
         elif isinstance(expr, ast.Subscript):
             # Subscript access
