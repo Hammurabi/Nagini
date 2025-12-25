@@ -311,47 +311,6 @@ int list_add(List* list, List* other) {
     return 0;
 }
 
-void* alloc(Runtime* runtime, size_t size, bool* is_manual, int* pool_id, bool zeroed) {
-    if (!runtime || !runtime->pool) return NULL;
-
-    int id = -1;
-    for (int i = 0; i < 64; i++) {
-        if (size <= runtime->pool->powers_of_two[i]->block_payload_size) {
-            id = i;
-            break;
-        }
-    }
-
-    if (id == -1) {
-        *is_manual = true;
-        *pool_id = 0;
-        void* ptr = malloc(size);
-        if (zeroed) memset(ptr, 0, size);
-        return ptr;
-    }
-
-    *is_manual = false;
-    *pool_id = id;
-
-    void* ptr = dynamic_pool_alloc(runtime->pool->powers_of_two[id]);
-    if (zeroed) memset(ptr, 0, size);
-    return ptr;
-}
-
-void del(Runtime* runtime, void* ptr, bool is_manual, int pool_id) {
-    if (is_manual) {
-        free(ptr);
-    } else {
-        if (pool_id >= 0 && pool_id < 64) {
-            dynamic_pool_free(runtime->pool->powers_of_two[pool_id], ptr);
-        }
-    }
-}
-
-
-
-
-
 
 // Configuration
 #define DICT_INITIAL_CAPACITY 2 // Must be power of 2
@@ -425,61 +384,6 @@ int64_t hash_float(FloatObject* fobj) {
     if (hash == -1) hash = -2;
 
     return hash;
-}
-
-static inline Object* NgCall(Runtime* runtime, Function* func, Tuple* args, Dict* kwargs) {
-    Object* (*native_func)(Runtime*, Tuple*, Dict*) = (Object* (*)(Runtime*, Tuple*, Dict*))func->native_ptr;
-    return native_func(runtime, args, kwargs);
-}
-
-static inline int64_t hash(Runtime* runtime, Object* obj) {
-    int32_t obj_type = obj->__flags__.type;
-
-    switch (obj_type) {
-        case OBJ_TYPE_INT: {
-            IntObject* int_obj = (IntObject*)obj;
-            int64_t val = int_obj->__value__;
-            if (val == -1) return -2;
-            return val;
-        }
-        case OBJ_TYPE_FLOAT:
-            return hash_float((FloatObject*)obj);
-        case OBJ_TYPE_TUPLE: {
-            Tuple* tuple = (Tuple*)obj;
-            int64_t h = 17;
-            for (size_t i = 0; i < tuple->size; i++) {
-                h = h * 31 + hash(runtime, tuple->items[i]);
-            }
-            return h;
-        }
-        case OBJ_TYPE_STRING: {
-            StringObject* str_obj = (StringObject*)obj;
-            return str_obj->hash;
-        }
-        case OBJ_TYPE_BYTES: {
-            BytesObject* bytes_obj = (BytesObject*)obj;
-            return bytes_obj->hash;
-        }
-        case OBJ_TYPE_INSTANCE: {
-            InstanceObject* inst = (InstanceObject*)obj;
-            Function* hash_method = (Function*)dict_get(runtime, inst->__dict__, runtime->builtin_names.__hash__);
-            if (hash_method) {
-                Tuple* self_arg = (Tuple*) alloc_tuple(runtime, 1, &obj);
-                Object* result = NgCall(runtime, hash_method, self_arg, NULL);
-                DECREF(runtime, (Object*)self_arg);
-                if (result && result->__flags__.type == OBJ_TYPE_INT) {
-                    IntObject* int_result = (IntObject*) result;
-                    int64_t h = int_result->__value__;
-                    if (h == -1) h = -2;
-                    return h;
-                }
-            }
-
-            return (int64_t)(uintptr_t)obj; // placeholder
-        }
-        default:
-            return (int64_t)(uintptr_t)obj;
-    }
 }
 
 Dict* alloc_dict(Runtime* runtime) {
@@ -676,16 +580,6 @@ Object* NgGetMember(Runtime* runtime, InstanceObject* instance, StringObject* me
     if (!dict) return NULL;
 
     return dict_get(runtime, dict, (Object*)member);
-}
-
-void NgSetMember(Runtime* runtime, InstanceObject* instance, StringObject* member, Object* value) {
-    Dict* dict = instance->__dict__;
-    if (!dict) {
-        dict = alloc_dict(runtime);
-        instance->__dict__ = dict;
-    }
-
-    dict_set(runtime, dict, (Object*)member, value);
 }
 
 void NgSetMember(Runtime* runtime, InstanceObject* instance, StringObject* member, Object* value) {
@@ -940,6 +834,27 @@ typedef struct Runtime {
     BuiltinNames    builtin_names;
 } Runtime;
 
+/* Function prototypes that depend on Runtime */
+void* alloc(Runtime* runtime, size_t size, bool* is_manual, int* pool_id, bool zeroed);
+void del(Runtime* runtime, void* ptr, bool is_manual, int pool_id);
+Object* alloc_str(Runtime* runtime, const char* data);
+Object* alloc_int(Runtime* runtime, int64_t value);
+Object* alloc_double(Runtime* runtime, double value);
+Object* alloc_bytes(Runtime* runtime, const char* data, size_t len);
+Object* alloc_function(Runtime* runtime, const char* name, int32_t line, size_t arg_count, void* native_ptr);
+Object* alloc_tuple(Runtime* runtime, size_t size, Object** objects);
+Object* alloc_list(Runtime* runtime);
+Object* alloc_instance(Runtime* runtime);
+Object* alloc_object(Runtime* runtime, int32_t typename);
+Dict* alloc_dict(Runtime* runtime);
+int dict_set(Runtime* runtime, Dict* d, Object* key, Object* value);
+Object* dict_get(Runtime* runtime, Dict* d, Object* key);
+bool dict_del(Runtime* runtime, Dict* d, Object* key);
+void dict_destroy(Runtime* runtime, Dict* d);
+void DECREF(Runtime* runtime, void* obj);
+void* INCREF(void* obj);
+int64_t hash(Runtime* runtime, Object* obj);
+
 Runtime* init_runtime() {
     Runtime* runtime = (Runtime*) malloc(sizeof(Runtime));
     runtime->symbol_table = hmap_create();
@@ -1184,6 +1099,102 @@ int32_t get_symbol_id(const char* name) {
     char* name_copy = strdup(name);
     hmap_put(runtime->symbol_table, key, name_copy);
     return key;
+}
+
+/* Allocate memory from a pool or manually */
+void* alloc(Runtime* runtime, size_t size, bool* is_manual, int* pool_id, bool zeroed) {
+    if (!runtime || !runtime->pool) return NULL;
+
+    int id = -1;
+    for (int i = 0; i < 64; i++) {
+        if (size <= runtime->pool->powers_of_two[i]->block_payload_size) {
+            id = i;
+            break;
+        }
+    }
+
+    if (id == -1) {
+        *is_manual = true;
+        *pool_id = 0;
+        void* ptr = malloc(size);
+        if (zeroed) memset(ptr, 0, size);
+        return ptr;
+    }
+
+    *is_manual = false;
+    *pool_id = id;
+
+    void* ptr = dynamic_pool_alloc(runtime->pool->powers_of_two[id]);
+    if (zeroed) memset(ptr, 0, size);
+    return ptr;
+}
+
+/* Free memory from a pool or manually */
+void del(Runtime* runtime, void* ptr, bool is_manual, int pool_id) {
+    if (is_manual) {
+        free(ptr);
+    } else {
+        if (pool_id >= 0 && pool_id < 64) {
+            dynamic_pool_free(runtime->pool->powers_of_two[pool_id], ptr);
+        }
+    }
+}
+
+/* Call a function object */
+static inline Object* NgCall(Runtime* runtime, Function* func, Tuple* args, Dict* kwargs) {
+    Object* (*native_func)(Runtime*, Tuple*, Dict*) = (Object* (*)(Runtime*, Tuple*, Dict*))func->native_ptr;
+    return native_func(runtime, args, kwargs);
+}
+
+/* Hash an object */
+static inline int64_t hash(Runtime* runtime, Object* obj) {
+    int32_t obj_type = obj->__flags__.type;
+
+    switch (obj_type) {
+        case OBJ_TYPE_INT: {
+            IntObject* int_obj = (IntObject*)obj;
+            int64_t val = int_obj->__value__;
+            if (val == -1) return -2;
+            return val;
+        }
+        case OBJ_TYPE_FLOAT:
+            return hash_float((FloatObject*)obj);
+        case OBJ_TYPE_TUPLE: {
+            Tuple* tuple = (Tuple*)obj;
+            int64_t h = 17;
+            for (size_t i = 0; i < tuple->size; i++) {
+                h = h * 31 + hash(runtime, tuple->items[i]);
+            }
+            return h;
+        }
+        case OBJ_TYPE_STRING: {
+            StringObject* str_obj = (StringObject*)obj;
+            return str_obj->hash;
+        }
+        case OBJ_TYPE_BYTES: {
+            BytesObject* bytes_obj = (BytesObject*)obj;
+            return bytes_obj->hash;
+        }
+        case OBJ_TYPE_INSTANCE: {
+            InstanceObject* inst = (InstanceObject*)obj;
+            Function* hash_method = (Function*)dict_get(runtime, inst->__dict__, runtime->builtin_names.__hash__);
+            if (hash_method) {
+                Tuple* self_arg = (Tuple*) alloc_tuple(runtime, 1, &obj);
+                Object* result = NgCall(runtime, hash_method, self_arg, NULL);
+                DECREF(runtime, (Object*)self_arg);
+                if (result && result->__flags__.type == OBJ_TYPE_INT) {
+                    IntObject* int_result = (IntObject*) result;
+                    int64_t h = int_result->__value__;
+                    if (h == -1) h = -2;
+                    return h;
+                }
+            }
+
+            return (int64_t)(uintptr_t)obj; // placeholder
+        }
+        default:
+            return (int64_t)(uintptr_t)obj;
+    }
 }
 
 /* Create a new Object */
