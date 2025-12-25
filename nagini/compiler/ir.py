@@ -180,17 +180,8 @@ class NaginiIR:
         self.top_level_stmts = top_level_stmts
         self.functions: List[FunctionIR] = []
         self.main_body: List[StmtIR] = []
-        self.const_int_count = 0
-        self.const_float_count = 0
-        self.const_str_count = 0
-        self.const_bytes_count = 0
-        self.const_bool_count = 0
-
-        self.const_ints = {}
-        self.const_floats = {}
-        self.const_strs = {}
-        self.const_bytes = {}
-        self.const_bools = {}
+        self.const_count = 0
+        self.consts = {}
         
         # Cache for converted methods to avoid double conversion
         self.method_ir_cache = {}
@@ -198,43 +189,44 @@ class NaginiIR:
     def register_string_constant(self, value: str) -> str:
         """Register a string constant and return its unique name"""
         print("Registering string constant:", value)
-        ident = self.const_str_count
-        self.const_strs[ident] = value
-        self.const_str_count += 1
+        ident = self.const_count
+        self.consts[ident] = (f'"{value}"', 'alloc_string')
+        self.const_count += 1
         return ident
     
     def register_int_constant(self, value: int) -> str:
         """Register an integer constant and return its unique name"""
-        ident = self.const_int_count
-        self.const_ints[ident] = value
-        self.const_int_count += 1
+        ident = self.const_count
+        self.consts[ident] = (value, 'alloc_int')
+        self.const_count += 1
         return ident
     
     def register_float_constant(self, value: float) -> str:
         """Register a float constant and return its unique name"""
-        ident = self.const_float_count
-        self.const_floats[ident] = value
-        self.const_float_count += 1
+        ident = self.const_count
+        self.consts[ident] = (value, 'alloc_float')
+        self.const_count += 1
         return ident
     
     def register_bytes_constant(self, value: bytes) -> str:
         """Register a bytes constant and return its unique name"""
-        ident = self.const_bytes_count
-        self.const_bytes[ident] = value
-        self.const_bytes_count += 1
+        ident = self.const_count
+        self.consts[ident] = (value, 'alloc_bytes')
+        self.const_count += 1
         return ident
     
     def register_bool_constant(self, value: int) -> str:
         """Register a boolean constant and return its unique name"""
-        ident = self.const_bool_count
-        self.const_bools[ident] = value
-        self.const_bool_count += 1
+        ident = self.const_count
+        self.consts[ident] = (value, 'alloc_bool')
+        self.const_count += 1
         return ident
     
     def generate(self) -> 'NaginiIR':
         """Generate IR from parsed classes and functions"""
         # Convert class methods to IR first (to register all constants)
         for class_name, class_info in self.classes.items():
+            self.classes[class_name].name_id = self.register_string_constant(class_name)
             for method_info in class_info.methods:
                 # Convert method to IR to register any constants used
                 method_ir = self._convert_function_to_ir(method_info)

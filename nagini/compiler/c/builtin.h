@@ -202,6 +202,11 @@ typedef struct Object {
     int32_t         __refcount__;   /* Reference counter (outside programmer control) */
 } Object;
 
+/* Base Object class - all Nagini objects inherit from this */
+typedef struct Bool {
+    Object base;
+} Bool;
+
 typedef struct IntObject {
     Object base;
     int64_t       __value__;
@@ -374,8 +379,6 @@ static inline bool ObjectsEqual(Object* k1, Object* k2) {
     
     return false; 
 }
-
-
 
 int64_t hash_float(FloatObject* fobj) {
     double v = fobj->__value__;
@@ -903,23 +906,15 @@ typedef struct BuiltinNames {
 
 } BuiltinNames;
 
-typedef struct Constants {
-    Object* integers[CONST_INT_COUNT];
-    Object* floats[CONST_FLOAT_COUNT];
-    Object* strings[CONST_STR_COUNT];
-    Object* bytes[CONST_BYTES_COUNT];
-    Object* bools[CONST_BOOL_COUNT];
-} Constants;
-
 typedef struct Runtime {
     hmap_t*         symbol_table;
-    Constants       constants;
     PoolCollection* pool;
     int64_t         trace_size;
     char*           function_trace[4096];
     uint8_t         siphash_key[16];
     BuiltinNames    builtin_names;
     Object*         classes;
+    Object*         constants[CONST_COUNT];
 } Runtime;
 
 Runtime* init_runtime() {
@@ -1534,6 +1529,17 @@ Object* alloc_instance(Runtime* runtime) {
     obj->__dict__ = alloc_dict(runtime);
     obj->base.__allocation__.is_manual = 0;
     obj->base.__flags__.type = OBJ_TYPE_INSTANCE;
+
+    return (Object*)obj;
+}
+
+Object* alloc_bool(Runtime* runtime, bool value) {
+    Bool* obj = (Bool*) dynamic_pool_alloc(runtime->pool->ints);
+    obj->base.__typename__ = get_symbol_id(runtime, "bool");
+    obj->base.__refcount__ = 1;
+    obj->base.__flags__.boolean = value ? 1 : 0;
+    obj->base.__allocation__.is_manual = 0;
+    obj->base.__flags__.type = OBJ_TYPE_INT;
 
     return (Object*)obj;
 }

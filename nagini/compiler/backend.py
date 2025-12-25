@@ -103,11 +103,7 @@ class LLVMBackend:
             output_code.append('#include <sys/random.h>')
         output_code.append('')
         output_code.append('/* Nagini Constants */')
-        output_code.append(f'#define CONST_INT_COUNT {self.ir.const_int_count}')
-        output_code.append(f'#define CONST_FLOAT_COUNT {self.ir.const_float_count}')
-        output_code.append(f'#define CONST_STR_COUNT {self.ir.const_str_count}')
-        output_code.append(f'#define CONST_BYTES_COUNT {self.ir.const_str_count}')
-        output_code.append(f'#define CONST_BOOL_COUNT {self.ir.const_bool_count}')
+        output_code.append(f'#define CONST_COUNT {self.ir.const_count}')
         output_code.append('')
         output_code.append('/* Forward declarations */')
         output_code.append('typedef struct HashTable HashTable;')
@@ -343,31 +339,18 @@ class LLVMBackend:
             self.output_code.append('    Runtime* runtime = init_runtime();')
             self.output_code.append('')
             self.output_code.append('    /*')
-            self.output_code.append('    total constants:')
-            self.output_code.append(f'      ints: {self.ir.const_int_count}')
-            self.output_code.append(f'      floats: {self.ir.const_float_count}')
-            self.output_code.append(f'      strings: {self.ir.const_str_count}')
-            self.output_code.append(f'      bools: {self.ir.const_bool_count}')
-            self.output_code.append(f'      bytes: {self.ir.const_bytes_count}')
+            self.output_code.append(f'    total constants: {self.ir.const_count}')
             self.output_code.append('    */')
-            for k, v in self.ir.const_ints.items():
-                self.output_code.append(f'    runtime->constants.ints[{k}] = {v};')
-            for k, v in self.ir.const_floats.items():
-                self.output_code.append(f'    runtime->constants.floats[{k}] = alloc_float(runtime, {v});')
-            for k, v in self.ir.const_strs.items():
-                self.output_code.append(f'    runtime->constants.strings[{k}] = alloc_string(runtime, "{v}");')
-            for k, v in self.ir.const_bools.items():
-                bool_val = '1' if v else '0'
-                self.output_code.append(f'    runtime->constants.bools[{k}] = {bool_val};')
-            for k, v in self.ir.const_bytes.items():
-                self.output_code.append(f'    runtime->constants.bytes[{k}] = alloc_bytes(runtime, "{v}");')
+            for k, v in self.ir.consts.items():
+                a, b = v
+                self.output_code.append(f'    runtime->constants[{k}] = {b}(runtime, {a});')
             self.output_code.append('')
             self.output_code.append('    /* Initialize built-in classes and functions */')
             self.output_code.append('    /* Initialize user-defined classes */')
             for class_name in self.ir.classes.keys():
                 self.output_code.append(f'    Object* class_{class_name} = def_class_{class_name}(runtime);')
             for func_name in self.ir.classes.keys():
-                self.output_code.append(f'    dict_set(runtime, runtime->classes, alloc_string(runtime, "{func_name}"), class_{func_name});')
+                self.output_code.append(f'    dict_set(runtime, runtime->classes, runtime->constants[{self.ir.classes[func_name].name_id}], class_{func_name});')
 
         # Generate function body
         for stmt in func.body:
@@ -455,15 +438,15 @@ class LLVMBackend:
         """Generate C code for an expression IR node"""
         if isinstance(expr, ConstantIR):
             if expr.type_name == 'int':
-                return f'runtime->constants.integers[{expr.value}]'
+                return f'runtime->constants[{expr.value}]'
             elif expr.type_name == 'float':
-                return f'runtime->constants.floats[{expr.value}]'
+                return f'runtime->constants[{expr.value}]'
             elif expr.type_name == 'bool':
-                return f'runtime->constants.bools[{expr.value}]'
+                return f'runtime->constants[{expr.value}]'
             elif expr.type_name == 'str':
-                return f'runtime->constants.strings[{expr.value}]'
+                return f'runtime->constants[{expr.value}]'
             elif expr.type_name == 'bytes':
-                return f'runtime->constants.bytes[{expr.value}]'
+                return f'runtime->constants[{expr.value}]'
             else:
                 raise ValueError(f'Unknown constant type: {expr.type_name}')
         
@@ -578,7 +561,7 @@ class LLVMBackend:
                 # Accessing member on a known variable (possibly self)
                 # Cast to InstanceObject and access via __dict__
                 # return f'dict_get(runtime, ((InstanceObject* ){obj_code})->__dict__, runtime->builtin_names.{expr.attr})'
-            return f'NgGetMember(runtime, {obj_code}, runtime->constants.strings[{expr.attr}])'
+            return f'NgGetMember(runtime, {obj_code}, runtime->constants[{expr.attr}])'
             # return f'{obj_code}.{expr.attr}'
         
         elif isinstance(expr, SubscriptIR):

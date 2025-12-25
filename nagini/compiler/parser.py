@@ -45,6 +45,7 @@ class ClassInfo:
     layout: str = 'cpp'           # cpp, std430, custom
     paradigm: str = 'object'      # object, data
     parent: Optional[str] = 'Object'  # All classes inherit from Object by default
+    name_id: Optional[int] = None  # Unique identifier for the class name
     
     
 class NaginiParser:
