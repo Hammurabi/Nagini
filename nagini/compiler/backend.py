@@ -671,7 +671,7 @@ class LLVMBackend:
             for compiler in compilers:
                 try:
                     result = subprocess.run(
-                        [compiler, c_file, '-o', output_path],
+                        [compiler, c_file, '-o', output_path, '-lm'],
                         capture_output=True,
                         text=True
                     )
