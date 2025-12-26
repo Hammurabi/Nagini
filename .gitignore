@@ -188,3 +188,5 @@ simple_main
 simple_test
 test_pool
 test_hello*
+hello_class_test
+test_crash
