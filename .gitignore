@@ -195,3 +195,11 @@ test_call
 test_simple
 test_*.nag
 debug_dict
+test_magnitude.nag
+test_magnitude.c
+test_print_v.nag
+test_print_v.c
+test_simple_method.nag
+test_simple_method.c
+test_magnitude_debug.c
+debug_adds.txt
