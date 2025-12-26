@@ -37,6 +37,19 @@ class LLVMBackend:
         self.output_code = []
         self.declared_vars = set()  # Track declared variables
         self.main_function: Optional[FunctionIR] = None
+    
+    def _get_string_data_access(self, obj_code: str) -> str:
+        """
+        Helper method to generate code for accessing string data from a String Object.
+        Casts the Object* to UnicodeObject* and accesses the data field.
+        
+        Args:
+            obj_code: C expression that evaluates to an Object* (string)
+            
+        Returns:
+            C expression that accesses the string's char* data
+        """
+        return f'((UnicodeObject*){obj_code})->data'
         
     def generate(self) -> str:
         """
@@ -402,7 +415,12 @@ class LLVMBackend:
                 # Already declared, just assign
                 result.append(f'{ind}{stmt.target} = {expr_code};')
             else:
-                # First declaration - use int64_t for now (TODO: proper type inference)
+                # First declaration - use int64_t for now
+                # TODO: Implement proper type inference (tracked in issue #TBD)
+                # Currently hardcoded to int64_t, but should support:
+                # - float/double for floating point values
+                # - Object* for class instances
+                # - char* for strings
                 result.append(f'{ind}int64_t {stmt.target} = {expr_code};')
                 self.declared_vars.add(stmt.target)
         
@@ -465,7 +483,9 @@ class LLVMBackend:
             # For primitives, emit literal values directly instead of Object references
             if expr.type_name == 'int':
                 # Look up the actual value from ir.consts
-                actual_value = self.ir.consts[expr.value][0]
+                # ir.consts structure: {id: (value, alloc_func)}
+                # e.g., {0: (42, 'alloc_int'), 1: ("hello", 'alloc_str')}
+                actual_value = self.ir.consts[expr.value][0]  # First element is the value
                 return str(actual_value)
             elif expr.type_name == 'float':
                 actual_value = self.ir.consts[expr.value][0]
@@ -542,8 +562,8 @@ class LLVMBackend:
                         if isinstance(arg, ConstantIR):
                             if arg.type_name == 'str':
                                 format_parts.append('%s')
-                                # For string constants, cast Object* to UnicodeObject* and get data
-                                args_list.append(f'((UnicodeObject*){arg_code})->data')
+                                # For string constants, get the char* data using helper method
+                                args_list.append(self._get_string_data_access(arg_code))
                             elif arg.type_name == 'int':
                                 format_parts.append('%ld')
                                 args_list.append(arg_code)
