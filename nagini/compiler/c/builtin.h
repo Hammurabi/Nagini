@@ -1251,8 +1251,10 @@ Object* NgToString(Runtime* runtime, void* obj) {
                 Object* str_func = dict_get(runtime, dict, (Object*)str_method);
                 if (str_func) {
                     Function* func = (Function*)str_func;
-                    Object* tuple_args[1] = { o };
-                    Object* result = NgCall(runtime, func, alloc_tuple(runtime, 1, &tuple_args[0]), NULL);
+                    // Call __str__ method directly with self parameter
+                    // The method signature is: Object* method(Runtime*, Object* self)
+                    Object* (*method_ptr)(Runtime*, Object*) = (Object* (*)(Runtime*, Object*))func->native_ptr;
+                    Object* result = method_ptr(runtime, o);
                     return result;
                 }
                 //  else {
