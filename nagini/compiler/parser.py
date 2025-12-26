@@ -58,6 +58,8 @@ class FunctionInfo:
     line_no: int = 0  # Line number in source code (for debugging and error messages)
     is_static: bool = False  # Whether this is a static method (no self parameter)
     name_id: Optional[int] = None  # Unique identifier for the function name (set during IR generation)
+    func_id: Optional[int] = None  # Unique identifier for the function (set during IR generation)
+    full_name: Optional[str] = None  # Full name including class prefix (set during IR generation)
 
 @dataclass
 class ClassInfo:

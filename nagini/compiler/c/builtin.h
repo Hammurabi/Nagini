@@ -28,6 +28,20 @@ typedef enum {
     OBJ_TYPE_FUNCTION  = 10,
 } ObjectType;
 
+const char* obj_type_names[] = {
+    "object",
+    "instance",
+    "int",
+    "float",
+    "bytes",
+    "str",
+    "tuple",
+    "list",
+    "dict",
+    "set",
+    "function"
+};
+
 typedef enum {
     ALLOC_TYPE_POOL   = 0,
     ALLOC_TYPE_MANUAL = 1
@@ -64,6 +78,9 @@ Object* NgMod(Runtime* runtime, void* aa, void* bb);
 Object* NgPow(Runtime* runtime, void* aa, void* bb);
 void NgSetMember(Runtime* runtime, void* ii, void* mm, void* vv);
 void NgDelMember(Runtime* runtime, InstanceObject* instance, StringObject* member);
+Object* NgToString(Runtime* runtime, void* obj);
+const char* NgToCString(Runtime* runtime, void* obj);
+Object* NgCall(Runtime* runtime, void* func, void* args, void* kwargs);
 
 #if defined(__linux__) || defined(__unix__)
 void siphash_random_key(uint8_t key[16]) {
@@ -385,8 +402,32 @@ typedef struct Dict {
 } Dict;
 
 // Helper: Check if two keys are effectively equal
-static inline bool ObjectsEqual(Object* k1, Object* k2) {
-    if (k1 == k2) return true;
+static inline bool ObjectsEqual(Runtime* runtime, Object* k1, Object* k2) {
+    if (!k1 || !k2) return false;
+    int type0 = k1->__flags__.type;
+    int type1 = k2->__flags__.type;
+    if (type0 != type1) return false;
+    switch (type0) {
+        case OBJ_TYPE_INT: {
+            IntObject* int1 = (IntObject*)k1;
+            IntObject* int2 = (IntObject*)k2;
+            return int1->__value__ == int2->__value__;
+        }
+        case OBJ_TYPE_FLOAT: {
+            FloatObject* f1 = (FloatObject*)k1;
+            FloatObject* f2 = (FloatObject*)k2;
+            return f1->__value__ == f2->__value__;
+        }
+        case OBJ_TYPE_STRING: {
+            StringObject* str1 = (StringObject*)k1;
+            StringObject* str2 = (StringObject*)k2;
+            if (str1->hash != str2->hash) return false;
+            return true;
+        }
+        default:
+            return k1 == k2;
+    }
+    // if (hash(runtime, k1) == hash(runtime, k2)) return true;
     
     return false; 
 }
@@ -1172,6 +1213,143 @@ Runtime* init_runtime() {
     return runtime;
 }
 
+Object* NgToString(Runtime* runtime, void* obj) {
+    Object* o = (Object*)obj;
+
+    switch (o->__flags__.type) {
+        case OBJ_TYPE_INT: {
+            IntObject* int_obj = (IntObject*)o;
+            char buffer[1024];
+            snprintf(buffer, sizeof(buffer), "%lld", (long long)int_obj->__value__);
+            return alloc_str(runtime, buffer);
+        }
+        case OBJ_TYPE_FLOAT: {
+            FloatObject* float_obj = (FloatObject*)o;
+            char buffer[1024];
+            snprintf(buffer, sizeof(buffer), "%f", float_obj->__value__);
+            return alloc_str(runtime, buffer);
+        }
+        case OBJ_TYPE_STRING: {
+            return o; // Already a string
+        }
+        case OBJ_TYPE_BYTES: {
+            fprintf(stderr,
+                "TypeError: cannot convert '%s' to string\n",
+                obj_type_name(o)
+            );
+            exit(1);
+        }
+        case OBJ_TYPE_INSTANCE: {
+            InstanceObject* instance = (InstanceObject*)o;
+            Dict* dict = instance->__dict__;
+            if (dict) {
+                StringObject* str_method = (StringObject*)runtime->builtin_names.__str__;
+                Object* str_func = dict_get(runtime, dict, (Object*)str_method);
+                if (str_func) {
+                    Function* func = (Function*)str_func;
+                    Object* tuple_args[1] = { o };
+                    Object* result = NgCall(runtime, func, alloc_tuple(runtime, 1, &tuple_args[0]), NULL);
+                    return result;
+                }
+                //  else {
+                //     printf("No __str__ method on instance of '%s'\n", obj_type_name(o));
+                //     for (size_t i = 0; i < dict->capacity; i++) {
+                //         if (dict->entries[i].key == NULL) continue;
+                //         const char* key_str = NgToCString(runtime, dict->entries[i].key);
+                //         printf("Dict slot %zu: key '%i'\n", i, hash(runtime, dict->entries[i].key));
+                //         printf("Dict slot %zu: key '%i'\n", i, hash(runtime, str_method));
+                //     //     // printf("Dict slot %zu: key type %s\n %s\n", i,
+                //     //         dict->entries[i].key ? obj_type_name(dict->entries[i].key) : "NULL", key_str);
+                //     }
+                // }
+            }
+            // Convert the pointer to string
+            char buffer[64];
+            snprintf(buffer, sizeof(buffer), "<Instance at %p>", (void*)o);
+            return alloc_str(runtime, buffer);
+        }
+        default:
+            fprintf(stderr,
+                "TypeError: cannot convert '%s' to string\n",
+                obj_type_name(o)
+            );
+            exit(1);
+    }
+}
+
+static size_t utf8_encode(uint32_t cp, char *out) {
+    if (cp <= 0x7F) {
+        out[0] = (char)cp;
+        return 1;
+    } else if (cp <= 0x7FF) {
+        out[0] = 0xC0 | (cp >> 6);
+        out[1] = 0x80 | (cp & 0x3F);
+        return 2;
+    } else if (cp <= 0xFFFF) {
+        out[0] = 0xE0 | (cp >> 12);
+        out[1] = 0x80 | ((cp >> 6) & 0x3F);
+        out[2] = 0x80 | (cp & 0x3F);
+        return 3;
+    } else {
+        out[0] = 0xF0 | (cp >> 18);
+        out[1] = 0x80 | ((cp >> 12) & 0x3F);
+        out[2] = 0x80 | ((cp >> 6) & 0x3F);
+        out[3] = 0x80 | (cp & 0x3F);
+        return 4;
+    }
+}
+
+const char* string_cstr_tmp(const StringObject* s) {
+    // Fast path: ASCII, 1-byte storage, already null-terminated
+    if (s->base.base.__flags__.boolean && s->base.base.__flags__.reserved == 0) {
+        const UnicodeObject* u = (const UnicodeObject*)s;
+        return u->data;
+    }
+
+    // Thread-local scratch buffer
+    static _Thread_local char buf[16384];
+
+    char* p = buf;
+    unsigned int kind = s->base.base.__flags__.reserved;
+
+    if (kind == 0) {
+        const UnicodeObject* u = (const UnicodeObject*)s;
+        for (size_t i = 0; i < s->size; i++)
+            *p++ = u->data[i];
+    }
+    else if (kind == 1) {
+        const UnicodeObject16* u = (const UnicodeObject16*)s;
+        for (size_t i = 0; i < s->size; i++)
+            p += utf8_encode(u->data[i], p);
+    }
+    else {
+        const UnicodeObject32* u = (const UnicodeObject32*)s;
+        for (size_t i = 0; i < s->size; i++)
+            p += utf8_encode(u->data[i], p);
+    }
+
+    *p = '\0';
+    return buf;
+}
+
+const char* NgToCString(Runtime* runtime, void* obj) {
+    Object* str_obj = NgToString(runtime, obj);
+    if (!str_obj) {
+        return "None";
+    }
+
+    if (str_obj->__flags__.type != OBJ_TYPE_STRING) {
+        // Convert the pointer to string
+        static _Thread_local char buf[16384];
+        char* buffer = buf;
+        snprintf(buffer, sizeof(buffer), "<Instancez at %p>", (void*)obj);
+        return buffer;
+    }
+
+    StringObject* string = (StringObject*)str_obj;
+    return string_cstr_tmp(string);
+}
+
 int64_t as_int(Object* obj) {
     if (obj->__flags__.type != OBJ_TYPE_INT) {
         fprintf(stderr, "TypeError: Expected int object\n");
@@ -1255,7 +1433,10 @@ void del(Runtime* runtime, void* ptr, bool is_manual, int pool_id) {
 }
 
 /* Call a function object */
-static inline Object* NgCall(Runtime* runtime, Function* func, Tuple* args, Dict* kwargs) {
+inline Object* NgCall(Runtime* runtime, void* ffunc, void* aargs, void* kkwargs) {
+    Function* func = (Function*)ffunc;
+    Tuple* args = (Tuple*)aargs;
+    Dict* kwargs = (Dict*)kkwargs;
     Object* (*native_func)(Runtime*, Tuple*, Dict*) = (Object* (*)(Runtime*, Tuple*, Dict*))func->native_ptr;
     return native_func(runtime, args, kwargs);
 }
@@ -1338,12 +1519,19 @@ Dict* alloc_dict(Runtime* runtime) {
     return d;
 }
 
+
+
 static bool _dict_resize(Runtime* runtime, Dict* d, size_t new_capacity) {
     dict_entry_t* old_entries = d->entries;
     size_t old_capacity = d->capacity;
 
-    dict_entry_t* new_entries = (dict_entry_t*)calloc(new_capacity, sizeof(dict_entry_t));
+    bool is_manual = false;
+    int pool_id = 0;
+    dict_entry_t* new_entries = (dict_entry_t*) alloc(runtime, new_capacity * sizeof(dict_entry_t), &is_manual, &pool_id, true);
     if (!new_entries) return false;
+
+    int old_is_manual = d->__allocation__.is_manual;
+    int old_pool_id = d->__allocation__.pool_id;
 
     d->entries = new_entries;
     d->capacity = new_capacity;
@@ -1377,7 +1565,7 @@ static bool _dict_resize(Runtime* runtime, Dict* d, size_t new_capacity) {
         }
     }
 
-    del(runtime, old_entries, d->__allocation__.is_manual == 1, d->__allocation__.pool_id);
+    del(runtime, old_entries, old_is_manual == 1, old_pool_id);
     return true;
 }
 
@@ -1466,7 +1654,7 @@ int dict_set(Runtime* runtime, void* dd, void* kk, void* vv) {
             return 0;
         }
 
-        if (curr->hash == h && ObjectsEqual(curr->key, key)) { // key found, update value
+        if (curr->hash == h && ObjectsEqual(runtime, curr->key, key)) { // key found, update value
             curr->value = value;
             if (curr->value != value) {
                 if (curr->value) DECREF(runtime, curr->value);
@@ -1499,7 +1687,7 @@ Object* dict_get(Runtime* runtime, void* dd, void* kk) {
 
         if (curr->psl == 0) return NULL;
 
-        if (curr->hash == h && ObjectsEqual(curr->key, key)) {
+        if (curr->hash == h && ObjectsEqual(runtime, curr->key, key)) {
             return curr->value;
         }
 
@@ -1523,7 +1711,7 @@ bool dict_del(Runtime* runtime, void* dd, void* kk) {
 
         if (curr->psl == 0 || psl > curr->psl) return false;
 
-        if (curr->hash == h && ObjectsEqual(curr->key, key)) {
+        if (curr->hash == h && ObjectsEqual(runtime, curr->key, key)) {
             d->count--;
             while (true) {
                 size_t next_idx = (idx + 1) & d->mask;
@@ -1771,20 +1959,6 @@ Object* alloc_list(Runtime* runtime) {
     list_init(list, 1);
     return (Object*)list;
 }
-
-const char* obj_type_names[] = {
-    "object",
-    "instance",
-    "int",
-    "float",
-    "str",
-    "bytes",
-    "tuple",
-    "list",
-    "dict",
-    "function",
-    "set"
-};
 
 const char* obj_type_name(void* oo) {
     Object* obj = (Object*)oo;

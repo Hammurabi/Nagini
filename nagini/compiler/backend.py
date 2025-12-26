@@ -117,6 +117,7 @@ class LLVMBackend:
         output_code.append('typedef struct Runtime Runtime;')
         output_code.append('typedef struct Function Function;')
         output_code.append('typedef struct Set Set;')
+        output_code.append('typedef struct Tuple Tuple;')
         output_code.append('')
     
     def _gen_pools(self):
@@ -204,6 +205,11 @@ class LLVMBackend:
             self.output_code.append(f'    /* Allocate instance of {class_info.name} */')
             self.output_code.append(f'    Object* self = alloc_instance(runtime);')
             self.output_code.append(f'    {class_info.name}___init__(runtime, self{args});')
+            for method in class_info.methods:
+                if method.name == '__init__' or method.is_static:
+                    continue
+                self.output_code.append(f'    /* Initialize method: {method.name} */')
+                self.output_code.append(f'    NgSetMember(runtime, self, runtime->constants[{method.name_id}], runtime->constants[{method.func_id}]);')
             self.output_code.append(f'    return self;')
             self.output_code.append(f'}}')
             self.output_code.append('')
@@ -366,6 +372,8 @@ class LLVMBackend:
                 if isinstance(v, ClassInfo):
                     self.output_code.append(f'    runtime->constants[{k}] = def_class_{v.name}(runtime);')
                     self.output_code.append(f'    dict_set(runtime, runtime->classes, runtime->constants[{v.name_id}], runtime->constants[{k}]);')
+                elif isinstance(v, FunctionInfo):
+                    self.output_code.append(f'    runtime->constants[{k}] = alloc_function(runtime, "{v.name}", {v.line_no}, {len(v.params)}, (void*)&{v.full_name});')
                 else:
                     a, b = v
                     self.output_code.append(f'    runtime->constants[{k}] = {b}(runtime, {a});')
@@ -548,26 +556,15 @@ class LLVMBackend:
                         arg_code = self._gen_expr(arg)
                         # Determine format specifier based on arg type
                         if isinstance(arg, ConstantIR):
-                            if arg.type_name == 'str':
-                                format_parts.append('%s')
-                                args_list.append(arg_code)
-                            elif arg.type_name == 'int':
-                                format_parts.append('%lld')
-                                args_list.append(arg_code)
-                            elif arg.type_name == 'float':
-                                format_parts.append('%f')
-                                args_list.append(arg_code)
-                            else:
-                                format_parts.append('%s')
-                                args_list.append(arg_code)
+                            format_parts.append('%s')
+                            args_list.append(f'NgToCString(runtime, {arg_code})')
                         elif isinstance(arg, VariableIR):
                             # Assume int64_t for variables
-                            format_parts.append('%lld')
-                            args_list.append(arg_code)
+                            format_parts.append('%s')
+                            args_list.append(f'NgToCString(runtime, {arg_code})')
                         else:
-                            # Default to int format
-                            format_parts.append('%lld')
-                            args_list.append(arg_code)
+                            format_parts.append('%s')
+                            args_list.append(f'NgToCString(runtime, {arg_code})')
                     
                     format_str = ' '.join(format_parts)
                     if args_list:

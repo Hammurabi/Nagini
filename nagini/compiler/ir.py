@@ -255,14 +255,17 @@ class NaginiIR:
         self.consts_dict[str(class_info)] = ident
         return ident
 
-    # def register_method_constant(self, method_info: FunctionInfo) -> str:
-    #     """Register a method constant"""
-    #     method_name = method_info.name
-    #     ident = self.const_count
-    #     self.consts[ident] = method_info
-    #     self.const_count += 1
-    #     method_info.method_id = ident
-    #     return ident
+    def register_method_constant(self, method_info: FunctionInfo) -> str:
+        """Register a method constant"""
+        if str(method_info) in self.consts_dict:
+            return self.consts_dict[str(method_info)]
+        method_name = method_info.name
+        ident = self.const_count
+        self.consts[ident] = method_info
+        self.const_count += 1
+        method_info.func_id = ident
+        self.consts_dict[str(method_info)] = ident
+        return ident
     
     def generate(self) -> 'NaginiIR':
         """Generate IR from parsed classes and functions"""
@@ -272,11 +275,13 @@ class NaginiIR:
             self.register_class_constant(class_info)
             for method_info in class_info.methods:
                 method_info.name_id = self.register_string_constant(method_info.name)
+                method_info.func_id = self.register_method_constant(method_info)
                 # Convert method to IR to register any constants used
                 method_ir = self._convert_function_to_ir(method_info)
                 # Cache the method IR for later use by backend
                 cache_key = (class_name, method_info.name, method_info.line_no)
                 self.method_ir_cache[cache_key] = method_ir
+                method_info.full_name = f"{class_name}_{method_info.name}"
         
         # Convert parsed functions to IR
         for func_name, func_info in self.parsed_functions.items():
