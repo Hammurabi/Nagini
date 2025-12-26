@@ -1252,7 +1252,9 @@ Object* NgToString(Runtime* runtime, void* obj) {
                 if (str_func) {
                     Function* func = (Function*)str_func;
                     // Call __str__ method directly with self parameter
-                    // The method signature is: Object* method(Runtime*, Object* self)
+                    // ASSUMPTION: All __str__ methods have signature: Object* method(Runtime*, Object* self)
+                    // This is guaranteed by the code generator for all instance methods with one parameter.
+                    // DO NOT use this pattern for methods with different signatures or variadic methods.
                     Object* (*method_ptr)(Runtime*, Object*) = (Object* (*)(Runtime*, Object*))func->native_ptr;
                     Object* result = method_ptr(runtime, o);
                     return result;

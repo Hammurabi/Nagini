@@ -206,12 +206,14 @@ class NaginiIR:
 
     def register_string_constant(self, value: str) -> str:
         """Register a string constant and return its unique name"""
-        if value in self.consts_dict:
-            return self.consts_dict[value]
+        # Use tuple key (type, value) to ensure strings don't collide with other types
+        key = ('str', value)
+        if key in self.consts_dict:
+            return self.consts_dict[key]
         ident = self.const_count
         self.consts[ident] = (f'"{value}"', 'alloc_str')
         self.const_count += 1
-        self.consts_dict[value] = ident
+        self.consts_dict[key] = ident
         return ident
     
     def register_int_constant(self, value: int) -> str:
@@ -242,12 +244,15 @@ class NaginiIR:
     
     def register_bytes_constant(self, value: bytes) -> str:
         """Register a bytes constant and return its unique name"""
-        if value in self.consts_dict:
-            return self.consts_dict[value]
+        # Use tuple key (type, value) to avoid collision with strings
+        # Bytes and str objects can have similar representations
+        key = ('bytes', value)
+        if key in self.consts_dict:
+            return self.consts_dict[key]
         ident = self.const_count
         self.consts[ident] = (value, 'alloc_bytes')
         self.const_count += 1
-        self.consts_dict[value] = ident
+        self.consts_dict[key] = ident
         return ident
     
     def register_bool_constant(self, value: int) -> str:
