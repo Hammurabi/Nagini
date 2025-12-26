@@ -242,11 +242,17 @@ void dynamic_pool_free(dynamic_pool_t* pool, void* ptr) {
 
     page->used_count--;
 
-    // 4. SHRINK: If page is completely empty, return memory to OS
-    if (page->used_count == 0) {
-        _unlink_page(&pool->partial_pages, page);
-        free(page);
-    }
+    // NOTE: We intentionally do NOT free empty pages back to the OS.
+    // Keeping pages allocated has several benefits:
+    // 1. Avoids potential use-after-free bugs if there are lingering references
+    // 2. Improves performance by keeping memory warm for reuse
+    // 3. Reduces malloc/free overhead
+    // The pages will be properly freed when the entire pool is destroyed.
+    
+    // if (page->used_count == 0) {
+    //     _unlink_page(&pool->partial_pages, page);
+    //     free(page);
+    // }
 }
 
 void dynamic_pool_destroy(dynamic_pool_t* pool) {
