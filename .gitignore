@@ -190,3 +190,8 @@ test_pool
 test_hello*
 hello_class_test
 test_crash
+test_access
+test_call
+test_simple
+test_*.nag
+debug_dict
