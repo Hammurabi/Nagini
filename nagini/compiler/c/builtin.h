@@ -789,6 +789,8 @@ typedef struct PoolCollection {
 } PoolCollection;
 
 typedef struct BuiltinNames {
+    StringObject* none;
+
     /* -------------------------------------------------------------------------
      * 1. Object Lifecycle & Memory Management
      * ------------------------------------------------------------------------- */
@@ -1019,6 +1021,8 @@ Runtime* init_runtime() {
     // Generate a random SIPHASH key
     siphash_random_key(runtime->siphash_key);
 
+    runtime->builtin_names.none  = (StringObject*) alloc_str(runtime, "None");
+
     // -------------------------------------------------------------------------
     // 1. Object Lifecycle & Memory Management
     // -------------------------------------------------------------------------
@@ -1219,13 +1223,13 @@ Object* NgToString(Runtime* runtime, void* obj) {
     switch (o->__flags__.type) {
         case OBJ_TYPE_INT: {
             IntObject* int_obj = (IntObject*)o;
-            char buffer[1024];
+            char buffer[131072];
             snprintf(buffer, sizeof(buffer), "%lld", (long long)int_obj->__value__);
             return alloc_str(runtime, buffer);
         }
         case OBJ_TYPE_FLOAT: {
             FloatObject* float_obj = (FloatObject*)o;
-            char buffer[1024];
+            char buffer[131072];
             snprintf(buffer, sizeof(buffer), "%f", float_obj->__value__);
             return alloc_str(runtime, buffer);
         }
@@ -1264,7 +1268,7 @@ Object* NgToString(Runtime* runtime, void* obj) {
                 // }
             }
             // Convert the pointer to string
-            char buffer[64];
+            char buffer[131072];
             snprintf(buffer, sizeof(buffer), "<Instance at %p>", (void*)o);
             return alloc_str(runtime, buffer);
         }
@@ -1307,7 +1311,7 @@ const char* string_cstr_tmp(const StringObject* s) {
     }
 
     // Thread-local scratch buffer
-    static _Thread_local char buf[16384];
+    static _Thread_local char buf[65536];
 
     char* p = buf;
     unsigned int kind = s->base.base.__flags__.reserved;
@@ -1340,7 +1344,7 @@ const char* NgToCString(Runtime* runtime, void* obj) {
 
     if (str_obj->__flags__.type != OBJ_TYPE_STRING) {
         // Convert the pointer to string
-        static _Thread_local char buf[16384];
+        static _Thread_local char buf[65536];
         char* buffer = buf;
         snprintf(buffer, sizeof(buffer), "<Instancez at %p>", (void*)obj);
         return buffer;
@@ -2094,4 +2098,115 @@ void DECREF(Runtime* runtime, void* obj) {
             }
         }
     }
+}
+
+/*
+    target: cpu, or gpu
+    capture: a list of, 
+*/
+// void NgDefOptim(Runtime* runtime, const char* target, 
+//     int32_t name_id = get_symbol_id(runtime, name);
+//     Function* func = (Function*) alloc_function(runtime, name, 0, 0, func_ptr);
+//     dict_set(runtime, runtime->classes, (Object*) alloc_str(runtime, name), (Object*) func);
+//     DECREF(runtime, (Object*) func);
+// }
+
+Object* NgCatStr(Runtime* runtime, Object* a, Object* b)
+{
+    const char* a_str = NgToCString(runtime, a);
+    const char* b_str = NgToCString(runtime, b);
+
+    size_t a_len = strlen(a_str);
+    size_t b_len = strlen(b_str);
+
+    static _Thread_local char buffer[65536];
+    if (a_len + b_len >= sizeof(buffer)) {
+        fprintf(stderr, "Error: concatenated string too long\n");
+        exit(1);
+    }
+
+    memcpy(buffer, a_str, a_len);
+    memcpy(buffer + a_len, b_str, b_len);
+    buffer[a_len + b_len] = '\0';
+
+    Object* result = alloc_str(runtime, buffer);
+    return result;
+}
+
+Object* NgJoinedStr(Runtime* runtime, void** values, size_t count)
+{
+    static _Thread_local char buffer[131072];
+    size_t offset = 0;
+    for (size_t i = 0; i < count; i++) {
+        Object* val = (Object*)values[i];
+        const char* val_str = NgToCString(runtime, val);
+        size_t val_len = strlen(val_str);
+        if (offset + val_len >= sizeof(buffer)) {
+            fprintf(stderr, "Error: joined string too long\n");
+            exit(1);
+        }
+        memcpy(buffer + offset, val_str, val_len);
+        offset += val_len;
+    }
+
+    buffer[offset] = '\0';
+    Object* result = alloc_str(runtime, buffer);
+    return result;
+}
+
+Object* NgFloatToFixed(Runtime* rt, Object* obj, int precision)
+{
+    double v = ((FloatObject*)obj)->__value__;
+
+    char buf[128];
+
+    int n = snprintf(
+        buf,
+        sizeof(buf),
+        "%.*f",
+        precision,
+        v
+    );
+
+    if (n < 0)
+        return (Object*) rt->builtin_names.none;
+
+    return alloc_str(rt, buf);
+}
+
+Object* NgApplyFormat(Runtime* rt, Object* value, Object* spec)
+{
+    const char* fmt = string_cstr_tmp((StringObject*)spec);
+
+    if (value->__flags__.type == OBJ_TYPE_FLOAT) {
+        if (strcmp(fmt, ".2f") == 0)
+            return NgFloatToFixed(rt, value, 2);
+        else {
+            fprintf(stderr,
+                "ValueError: unsupported format spec '%s' for float\n",
+                fmt
+            );
+            exit(1);
+        }
+    }
+
+    // fallback
+    return NgToString(rt, value);
+}
+
+Object* NgFormattedValue(Runtime* runtime, void* vv, void* ss)
+{
+    if (!vv) return (Object*) runtime->builtin_names.none;
+
+    Object* value = (Object*)vv;
+    Object* sspec = (Object*)ss; // should be a string spec
+    if (!sspec) return NgToString(runtime, value);
+    if (sspec->__flags__.type != OBJ_TYPE_STRING) {
+        fprintf(stderr,
+            "TypeError: format spec must be a string, not '%s'\n",
+            obj_type_name(sspec)
+        );        exit(1);
+    }
+
+    return NgApplyFormat(runtime, value, sspec);
 }

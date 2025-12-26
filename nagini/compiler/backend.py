@@ -13,7 +13,7 @@ from .ir import (
     ConstantIR, VariableIR, BinOpIR, UnaryOpIR, CallIR, AttributeIR,
     AssignIR, ReturnIR, IfIR, WhileIR, ForIR, ExprStmtIR,
     ConstructorCallIR, LambdaIR, BoxIR, UnboxIR, SubscriptIR,
-    SetAttrIR
+    SetAttrIR, JoinedStrIR, FormattedValueIR
 )
 
 def load_c_from_file(filename: str) -> str:
@@ -395,7 +395,7 @@ class LLVMBackend:
         """Generate C code for a statement IR node"""
         ind = '    ' * indent
         result = []
-        
+
         if isinstance(stmt, SetAttrIR):
             # Set attribute on object
             obj_code = self._gen_expr(stmt.obj)
@@ -483,6 +483,13 @@ class LLVMBackend:
             else:
                 raise ValueError(f'Unknown constant type: {expr.type_name}')
         
+        elif isinstance(expr, JoinedStrIR):
+            return f'NgJoinedStr(runtime, (void*[]) {{' + ', '.join([self._gen_expr(value) for value in expr.parts]) + f'}}, {len(expr.parts)})'
+        
+        elif isinstance(expr, FormattedValueIR):
+            format_spec = self._gen_expr(expr.format_spec) if expr.format_spec else 'NULL'
+            return f'NgFormattedValue(runtime, {self._gen_expr(expr.value)}, {format_spec})'
+
         elif isinstance(expr, VariableIR):
             # Variable reference
             return expr.name

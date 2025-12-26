@@ -72,6 +72,17 @@ class SubscriptIR(ExprIR):
     obj: ExprIR
     index: ExprIR
 
+@dataclass
+class JoinedStrIR(ExprIR):
+    """Joined string (f-string)"""
+    parts: List[ExprIR]
+
+@dataclass
+class FormattedValueIR(ExprIR):
+    """Formatted value in f-string"""
+    value: ExprIR
+    format_spec: Optional[ExprIR] = None
+
 
 @dataclass
 class ConstructorCallIR(ExprIR):
@@ -571,6 +582,36 @@ class NaginiIR:
             obj = self._convert_expr_to_ir(expr.value)
             index = self._convert_expr_to_ir(expr.slice)
             return SubscriptIR(obj, index)
+        
+        elif isinstance(expr, ast.JoinedStr):
+            # f-string (JoinedStr)
+            # For simplicity, convert to concatenation of strings
+            parts = []
+            for value in expr.values:
+                if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                    const_idx = self.register_string_constant(value.value)
+                    parts.append(ConstantIR(const_idx, 'str'))
+                else:
+                    part_ir = self._convert_expr_to_ir(value)
+                    parts.append(part_ir)
+            return JoinedStrIR(parts)
+        
+        elif isinstance(expr, ast.FormattedValue):
+            # Formatted value in f-string
+            value_ir = self._convert_expr_to_ir(expr.value)
+            format_spec_ir = expr.format_spec
+            # if its a joinedstr with 1 constant, convert to constant
+            if format_spec_ir and isinstance(format_spec_ir, ast.JoinedStr) and len(format_spec_ir.values) == 1:
+                fs_value = format_spec_ir.values[0]
+                if isinstance(fs_value, ast.Constant) and isinstance(fs_value.value, str):
+                    fs_idx = self.register_string_constant(fs_value.value)
+                    format_spec_ir = ConstantIR(fs_idx, 'str')
+                else:
+                    format_spec_ir = self._convert_expr_to_ir(format_spec_ir)
+            else:
+                format_spec_ir = self._convert_expr_to_ir(expr.format_spec) if expr.format_spec else None
+
+            return FormattedValueIR(value_ir, format_spec_ir)
         
         # Return a placeholder for unsupported expressions
         # TODO: Add better error handling or warnings for unsupported expression types
