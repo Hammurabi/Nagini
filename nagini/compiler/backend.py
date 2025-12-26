@@ -201,10 +201,12 @@ class LLVMBackend:
                         args += f', {param_name}'
                         prms += f', Object* {param_name}'
 
-            self.output_code.append(f'Object* NgAlloc{class_info.name}(Runtime* runtime{prms}) {{')
+            self.output_code.append(f'Object* NgAlloc{class_info.name}(Runtime* runtime, Tuple* args, Dict* kwargs) {{')
             self.output_code.append(f'    /* Allocate instance of {class_info.name} */')
+                
             self.output_code.append(f'    Object* self = alloc_instance(runtime);')
-            self.output_code.append(f'    {class_info.name}___init__(runtime, self{args});')
+            self.output_code.append(f'    args = (Tuple*) NgPrependTuple(runtime, self, args);')
+            self.output_code.append(f'    {class_info.name}___init__(runtime, args, kwargs);')
             for method in class_info.methods:
                 if method.name == '__init__' or method.is_static:
                     continue
@@ -216,6 +218,7 @@ class LLVMBackend:
             self.output_code.append(f'Object* def_class_{class_info.name}(Runtime* runtime) {{')
             self.output_code.append(f'    /* Create class {class_info.name} inheriting from {class_info.parent} */')
             self.output_code.append(f'    Object* cls = alloc_instance(runtime);')
+            self.output_code.append(f'    NgSetMember(runtime, cls, runtime->builtin_names.__typename__, runtime->constants[{class_info.name_id}]);')
             self.output_code.append(f'    /* {class_info.methods} Methods */')
             num_instance_methods = sum(1 for m in class_info.methods if not m.is_static and m.name != '__init__')
             current_method_index = 0
@@ -291,7 +294,6 @@ class LLVMBackend:
                 param_types.append(param_type)
         
         params_str = ', '.join(params_list)
-        
         self.output_code.append('')
         self.output_code.append(f'/* Parameter types for method {class_info.name}.{method_ir.name} */')
         # self.output_code.append(f'/* Types: {", ".join(param_types)} */')
@@ -299,7 +301,23 @@ class LLVMBackend:
         method_name = f'{class_info.name}_{method_ir.name}'
         
         self.output_code.append(f'/* Method: {class_info.name}.{method_ir.name} */')
-        self.output_code.append(f'{return_type} {method_name}({params_str}) {{')
+        self.output_code.append(f'{return_type} {method_name}(Runtime* runtime, Tuple* args, Dict* kwargs) {{')
+        self.output_code.append(f'    if (args->size < {len(method_ir.params)}) {{')
+        self.output_code.append(f'        fprintf(stderr, "Runtime Error: Method \'{class_info.name}.{method_ir.name}\' expects at least {len(method_ir.params)} arguments but got %zu\\n", args->size);')
+        self.output_code.append(f'        exit(1);')
+        self.output_code.append(f'    }}')
+        self.output_code.append('')
+        for i, (param_name, param_type) in enumerate(method_ir.params):
+            self.output_code.append(f'    /* Extract parameter: {param_name} */')
+            self.output_code.append(f'    Object* {param_name} = args->items[{i}];')
+            if param_type:
+                self.output_code.append(f'    char pName_{param_name}[64];')
+                self.output_code.append(f'    NgGetTypeName(runtime, {param_name}, pName_{param_name}, sizeof(pName_{param_name}));')
+                self.output_code.append(f'    if (strcmp("{param_type}", pName_{param_name}) != 0) {{')
+                self.output_code.append(f'        fprintf(stderr, "Runtime Error: Received wrong type for parameter \'{param_name}\' in method \'{class_info.name}.{method_ir.name}\'.\\n Expected type: {param_type}, got: %s\\n", pName_{param_name});')
+                self.output_code.append(f'        exit(1);')
+                self.output_code.append(f'    }}')
+            
         
         # Verify hmap_get(self.hmap, symbol_id) against expected types for strict parameters (symbol_id should be of '__typename__' convention)
             
@@ -604,7 +622,7 @@ class LLVMBackend:
             # Generate call to create_classname() function
             func_name = f'NgAlloc{expr.class_name}'
             args_code = ', '.join([self._gen_expr(arg) for arg in expr.args])
-            return f'{func_name}(runtime, {args_code})'
+            return f'{func_name}(runtime, (Tuple*) alloc_tuple(runtime, {len(expr.args)}, (Object* []) {{{args_code}}}), NULL)'
         
         elif isinstance(expr, LambdaIR):
             # Lambda expression - generate as inline anonymous function
