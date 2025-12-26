@@ -1442,9 +1442,17 @@ void del(Runtime* runtime, void* ptr, bool is_manual, int pool_id) {
 
 /* Call a function object */
 inline Object* NgCall(Runtime* runtime, void* ffunc, void* aargs, void* kkwargs) {
+    if (!ffunc) {
+        fprintf(stderr, "Runtime Error: Attempting to call NULL function\n");
+        exit(1);
+    }
     Function* func = (Function*)ffunc;
     Tuple* args = (Tuple*)aargs;
     Dict* kwargs = (Dict*)kkwargs;
+    if (!func->native_ptr) {
+        fprintf(stderr, "Runtime Error: Function has NULL native_ptr\n");
+        exit(1);
+    }
     Object* (*native_func)(Runtime*, Tuple*, Dict*) = (Object* (*)(Runtime*, Tuple*, Dict*))func->native_ptr;
     return native_func(runtime, args, kwargs);
 }
