@@ -1253,13 +1253,11 @@ Object* NgToString(Runtime* runtime, void* obj) {
                 StringObject* str_method = (StringObject*)runtime->builtin_names.__str__;
                 Object* str_func = dict_get(runtime, dict, (Object*)str_method);
                 if (str_func) {
-                    Function* func = (Function*)str_func;
-                    // Call __str__ method directly with self parameter
-                    // ASSUMPTION: All __str__ methods have signature: Object* method(Runtime*, Object* self)
-                    // This is guaranteed by the code generator for all instance methods with one parameter.
-                    // DO NOT use this pattern for methods with different signatures or variadic methods.
-                    Object* (*method_ptr)(Runtime*, Object*) = (Object* (*)(Runtime*, Object*))func->native_ptr;
-                    Object* result = method_ptr(runtime, o);
+                    // Call __str__ method using new calling convention
+                    // All methods now use (Runtime*, Tuple*, Dict*) signature
+                    Object* args_array[1] = {o};
+                    Tuple* args = (Tuple*)alloc_tuple(runtime, 1, args_array);
+                    Object* result = NgCall(runtime, str_func, args, NULL);
                     return result;
                 }
                 //  else {
