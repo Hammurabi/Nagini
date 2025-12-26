@@ -1453,6 +1453,15 @@ inline Object* NgCall(Runtime* runtime, void* ffunc, void* aargs, void* kkwargs)
         fprintf(stderr, "Runtime Error: Function has NULL native_ptr\n");
         exit(1);
     }
+    
+    // Handle instance methods with single parameter (self)
+    // These are called with signature: Object* method(Runtime*, Object* self)
+    if (func->arg_count == 1 && args && args->size == 1) {
+        Object* (*method_func)(Runtime*, Object*) = (Object* (*)(Runtime*, Object*))func->native_ptr;
+        return method_func(runtime, args->items[0]);
+    }
+    
+    // Handle regular functions with tuple/dict signature
     Object* (*native_func)(Runtime*, Tuple*, Dict*) = (Object* (*)(Runtime*, Tuple*, Dict*))func->native_ptr;
     return native_func(runtime, args, kwargs);
 }
