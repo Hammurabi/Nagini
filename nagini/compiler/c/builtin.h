@@ -1755,8 +1755,13 @@ void dict_destroy(Runtime* runtime, void* dd) {
         }
     }
     
-    free(d->entries);
-    free(d);
+    // Free the entries array
+    bool is_manual = d->__allocation__.is_manual == 1;
+    int pool_id = d->__allocation__.pool_id;
+    del(runtime, d->entries, is_manual, pool_id);
+    
+    // Free the dict itself from the pool
+    dynamic_pool_free(runtime->pool->dict, d);
 }
 
 // Object* NgAllocNew(Runtime* runtime, Object* cls) {

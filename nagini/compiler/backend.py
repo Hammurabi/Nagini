@@ -228,17 +228,13 @@ class LLVMBackend:
                     has_init = True
                     self.output_code.append(f'    {{')
                     # Object* alloc_function(Runtime* runtime, const char* name, int32_t line, size_t arg_count, void* native_ptr)
-                    self.output_code.append(f'        Object* member_name = alloc_str(runtime, "{field.name}");')
-                    self.output_code.append(f'        Object* member = alloc_function(runtime, "{field.name}", {field.line_no}, {len(field.params)}, (void*)&{class_info.name}_{field.name});')
-                    self.output_code.append(f'        NgSetMember(runtime, cls, member_name, member);')
+                    self.output_code.append(f'        NgSetMember(runtime, cls, runtime->constants[{field.name_id}], runtime->constants[{field.func_id}]);')
                     self.output_code.append(f'')
                     for field2 in class_info.methods:
                         if field2.name == '__init__' or field2.is_static:
                             continue
                         self.output_code.append(f'        /* Initialize method: {field2.name} */')
-                        # self.output_code.append(f'        Object* method_str_{field2.name} = alloc_string(runtime, "{field2.name}");')
-                        self.output_code.append(f'        Object* method_{field2.name} = alloc_function(runtime, "{field2.name}", {field2.line_no}, {len(field2.params)}, (void*)&{class_info.name}_{field2.name});')
-                        self.output_code.append(f'        NgSetMember(runtime, cls, runtime->constants[{field2.name_id}], method_{field2.name});')
+                        self.output_code.append(f'        NgSetMember(runtime, cls, runtime->constants[{field2.name_id}], runtime->constants[{field2.func_id}]);')
                         # self.output_code.append(f'        /* Initialize field: {field2.name} of type {field2.type_name} */')
                         # self.output_code.append(f'        Object* field_name = alloc_string(runtime, "{field2.name}");')
                         # self.output_code.append(f'        Object* default_value = alloc_default_value(runtime, "{field2.type_name}");')
@@ -246,9 +242,7 @@ class LLVMBackend:
                     self.output_code.append(f'    }}')
                 elif field.is_static:
                     self.output_code.append(f'    {{')
-                    self.output_code.append(f'        Object* member_name = alloc_str(runtime, "{field.name}");')
-                    self.output_code.append(f'        Object* member = alloc_function(runtime, "{field.name}", {field.line_no}, {len(field.params)}, (void*)&{class_info.name}_{field.name});')
-                    self.output_code.append(f'        NgSetMember(runtime, cls, member_name, member);')
+                    self.output_code.append(f'        NgSetMember(runtime, cls, runtime->constants[{field.name_id}], runtime->constants[{field.func_id}]);')
                     self.output_code.append(f'    }}')
             self.output_code.append(f'    return cls;')
             self.output_code.append(f'}}')
