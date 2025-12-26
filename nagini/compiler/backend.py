@@ -544,8 +544,14 @@ class LLVMBackend:
             if expr.is_method:
                 # Method call - for now, treat as function
                 obj_code = self._gen_expr(expr.obj)
-                args_code = ', '.join([self._gen_expr(arg) for arg in expr.args])
-                return f'{obj_code}.{expr.func_name}({args_code})'
+                args = expr.args  # Prepend object as first arg
+                args_code = ', '.join([self._gen_expr(arg) for arg in args])
+                if args_code:
+                    args_code = f'{obj_code}, {args_code}'
+                else:
+                    args_code = f'{obj_code}'
+                getmember = f'NgGetMember(runtime, {obj_code}, runtime->constants[{expr.func_id}])'
+                return f'NgCall(runtime, {getmember}, alloc_tuple(runtime, {len(args) + 1}, (Object*[]) {{{args_code}}}), NULL)'
             else:
                 # Regular function call
                 args_code = ', '.join([self._gen_expr(arg) for arg in expr.args])

@@ -51,6 +51,7 @@ class CallIR(ExprIR):
     kwargs: Optional[Dict[str, ExprIR]] = None  # Keyword arguments
     is_method: bool = False
     obj: Optional[ExprIR] = None  # For method calls
+    func_id: Optional[int] = None  # Function ID for method calls
 
 @dataclass
 class SetAttrIR(ExprIR):
@@ -552,7 +553,7 @@ class NaginiIR:
                     return ConstructorCallIR(func_name, args, kwargs if kwargs else None)
                 else:
                     # Regular function call
-                    return CallIR(func_name, args, kwargs if kwargs else None)
+                    return CallIR(func_name, args, kwargs if kwargs else None, func_id=self.register_string_constant(func_name))
             elif isinstance(expr.func, ast.Attribute):
                 # Method call (obj.method())
                 obj = self._convert_expr_to_ir(expr.func.value)
@@ -565,7 +566,7 @@ class NaginiIR:
                     if keyword.arg:
                         kwargs[keyword.arg] = self._convert_expr_to_ir(keyword.value)
                 
-                return CallIR(method_name, args, kwargs if kwargs else None, is_method=True, obj=obj)
+                return CallIR(method_name, args, kwargs if kwargs else None, is_method=True, obj=obj, func_id=self.register_string_constant(method_name))
         
         elif isinstance(expr, ast.Lambda):
             # Lambda expression

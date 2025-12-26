@@ -2178,20 +2178,33 @@ Object* NgFloatToFixed(Runtime* rt, Object* obj, int precision)
     return alloc_str(rt, buf);
 }
 
+int get_precision_from_fmt(const char *fmt) {
+    if (fmt == NULL) return -1;
+
+    // Look for the '.' character
+    const char *dot = strchr(fmt, '.');
+    if (!dot) return 0; // no decimal point, assume 0
+
+    // Convert the number after '.' to int
+    int precision = atoi(dot + 1); // atoi stops at the first non-digit
+    return precision;
+}
+
 Object* NgApplyFormat(Runtime* rt, Object* value, Object* spec)
 {
     const char* fmt = string_cstr_tmp((StringObject*)spec);
 
     if (value->__flags__.type == OBJ_TYPE_FLOAT) {
-        if (strcmp(fmt, ".2f") == 0)
-            return NgFloatToFixed(rt, value, 2);
-        else {
-            fprintf(stderr,
-                "ValueError: unsupported format spec '%s' for float\n",
-                fmt
-            );
-            exit(1);
-        }
+        int precision = get_precision_from_fmt(fmt);
+        // if (strcmp(fmt, ".2f") == 0)
+        return NgFloatToFixed(rt, value, precision);
+        // else {
+        //     fprintf(stderr,
+        //         "ValueError: unsupported format spec '%s' for float\n",
+        //         fmt
+        //     );
+        //     exit(1);
+        // }
     }
 
     // fallback
