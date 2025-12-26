@@ -12,7 +12,8 @@ from .ir import (
     NaginiIR, FunctionIR, StmtIR, ExprIR,
     ConstantIR, VariableIR, BinOpIR, UnaryOpIR, CallIR, AttributeIR,
     AssignIR, ReturnIR, IfIR, WhileIR, ForIR, ExprStmtIR,
-    ConstructorCallIR, LambdaIR, BoxIR, UnboxIR, SubscriptIR
+    ConstructorCallIR, LambdaIR, BoxIR, UnboxIR, SubscriptIR,
+    SetAttrIR
 )
 
 def load_c_from_file(filename: str) -> str:
@@ -108,6 +109,8 @@ class LLVMBackend:
         output_code.append('/* Forward declarations */')
         output_code.append('typedef struct HashTable HashTable;')
         output_code.append('typedef struct Object Object;')
+        output_code.append('typedef struct InstanceObject InstanceObject;')
+        output_code.append('typedef struct StringObject StringObject;')
         output_code.append('typedef struct DynamicPool DynamicPool;')
         output_code.append('typedef struct StaticPool StaticPool;')
         output_code.append('typedef struct Dict Dict;')
@@ -186,9 +189,27 @@ class LLVMBackend:
         
         if class_info.paradigm == 'object':
             # Object paradigm uses hash table for members
+            # same args as __init__
+            prms = ''
+            args = ''
+            for field in class_info.methods:
+                if field.name == '__init__':
+                    for param_name, param_type in field.params:
+                        if param_name == 'self':
+                            continue
+                        args += f', {param_name}'
+                        prms += f', Object* {param_name}'
+
+            self.output_code.append(f'Object* NgAlloc{class_info.name}(Runtime* runtime{prms}) {{')
+            self.output_code.append(f'    /* Allocate instance of {class_info.name} */')
+            self.output_code.append(f'    Object* self = alloc_instance(runtime);')
+            self.output_code.append(f'    {class_info.name}___init__(runtime, self{args});')
+            self.output_code.append(f'    return self;')
+            self.output_code.append(f'}}')
+            self.output_code.append('')
             self.output_code.append(f'Object* def_class_{class_info.name}(Runtime* runtime) {{')
             self.output_code.append(f'    /* Create class {class_info.name} inheriting from {class_info.parent} */')
-            self.output_code.append(f'    Object* cls = alloc_instance("{class_info.name}");')
+            self.output_code.append(f'    Object* cls = alloc_instance(runtime);')
             self.output_code.append(f'    /* {class_info.methods} Methods */')
             num_instance_methods = sum(1 for m in class_info.methods if not m.is_static and m.name != '__init__')
             current_method_index = 0
@@ -201,17 +222,17 @@ class LLVMBackend:
                     has_init = True
                     self.output_code.append(f'    {{')
                     # Object* alloc_function(Runtime* runtime, const char* name, int32_t line, size_t arg_count, void* native_ptr)
-                    self.output_code.append(f'        Object* member_name = alloc_string(runtime, "{field.name}");')
-                    self.output_code.append(f'        Object* member = alloc_function(runtime, "{field.name}", {field.line_no}, {len(field.params)}, (void*)&{class_info.name}_{field.name}_{field.line_no});')
+                    self.output_code.append(f'        Object* member_name = alloc_str(runtime, "{field.name}");')
+                    self.output_code.append(f'        Object* member = alloc_function(runtime, "{field.name}", {field.line_no}, {len(field.params)}, (void*)&{class_info.name}_{field.name});')
                     self.output_code.append(f'        NgSetMember(runtime, cls, member_name, member);')
                     self.output_code.append(f'')
                     for field2 in class_info.methods:
                         if field2.name == '__init__' or field2.is_static:
                             continue
                         self.output_code.append(f'        /* Initialize method: {field2.name} */')
-                        self.output_code.append(f'        Object* method_str_{field2.name} = alloc_string(runtime, "{field2.name}");')
-                        self.output_code.append(f'        Object* method_{field2.name} = alloc_function(runtime, "{field2.name}", {field2.line_no}, {len(field2.params)}, (void*)&{class_info.name}_{field2.name}_{field2.line_no});')
-                        self.output_code.append(f'        NgSetMember(runtime, cls, method_str_{field2.name}, method_{field2.name});')
+                        # self.output_code.append(f'        Object* method_str_{field2.name} = alloc_string(runtime, "{field2.name}");')
+                        self.output_code.append(f'        Object* method_{field2.name} = alloc_function(runtime, "{field2.name}", {field2.line_no}, {len(field2.params)}, (void*)&{class_info.name}_{field2.name});')
+                        self.output_code.append(f'        NgSetMember(runtime, cls, runtime->constants[{field2.name_id}], method_{field2.name});')
                         # self.output_code.append(f'        /* Initialize field: {field2.name} of type {field2.type_name} */')
                         # self.output_code.append(f'        Object* field_name = alloc_string(runtime, "{field2.name}");')
                         # self.output_code.append(f'        Object* default_value = alloc_default_value(runtime, "{field2.type_name}");')
@@ -219,8 +240,8 @@ class LLVMBackend:
                     self.output_code.append(f'    }}')
                 elif field.is_static:
                     self.output_code.append(f'    {{')
-                    self.output_code.append(f'        Object* member_name = alloc_string(runtime, "{field.name}");')
-                    self.output_code.append(f'        Object* member = alloc_function(runtime, "{field.name}", {field.line_no}, {len(field.params)}, (void*)&{class_info.name}_{field.name}_{field.line_no});')
+                    self.output_code.append(f'        Object* member_name = alloc_str(runtime, "{field.name}");')
+                    self.output_code.append(f'        Object* member = alloc_function(runtime, "{field.name}", {field.line_no}, {len(field.params)}, (void*)&{class_info.name}_{field.name});')
                     self.output_code.append(f'        NgSetMember(runtime, cls, member_name, member);')
                     self.output_code.append(f'    }}')
             self.output_code.append(f'    return cls;')
@@ -275,7 +296,7 @@ class LLVMBackend:
         self.output_code.append(f'/* Parameter types for method {class_info.name}.{method_ir.name} */')
         # self.output_code.append(f'/* Types: {", ".join(param_types)} */')
         # Method name is ClassName_methodname
-        method_name = f'{class_info.name}_{method_ir.name}_{method_info.line_no}'
+        method_name = f'{class_info.name}_{method_ir.name}'
         
         self.output_code.append(f'/* Method: {class_info.name}.{method_ir.name} */')
         self.output_code.append(f'{return_type} {method_name}({params_str}) {{')
@@ -342,15 +363,13 @@ class LLVMBackend:
             self.output_code.append(f'    total constants: {self.ir.const_count}')
             self.output_code.append('    */')
             for k, v in self.ir.consts.items():
-                a, b = v
-                self.output_code.append(f'    runtime->constants[{k}] = {b}(runtime, {a});')
+                if isinstance(v, ClassInfo):
+                    self.output_code.append(f'    runtime->constants[{k}] = def_class_{v.name}(runtime);')
+                    self.output_code.append(f'    dict_set(runtime, runtime->classes, runtime->constants[{v.name_id}], runtime->constants[{k}]);')
+                else:
+                    a, b = v
+                    self.output_code.append(f'    runtime->constants[{k}] = {b}(runtime, {a});')
             self.output_code.append('')
-            self.output_code.append('    /* Initialize built-in classes and functions */')
-            self.output_code.append('    /* Initialize user-defined classes */')
-            for class_name in self.ir.classes.keys():
-                self.output_code.append(f'    Object* class_{class_name} = def_class_{class_name}(runtime);')
-            for func_name in self.ir.classes.keys():
-                self.output_code.append(f'    dict_set(runtime, runtime->classes, runtime->constants[{self.ir.classes[func_name].name_id}], class_{func_name});')
 
         # Generate function body
         for stmt in func.body:
@@ -369,7 +388,13 @@ class LLVMBackend:
         ind = '    ' * indent
         result = []
         
-        if isinstance(stmt, AssignIR):
+        if isinstance(stmt, SetAttrIR):
+            # Set attribute on object
+            obj_code = self._gen_expr(stmt.obj)
+            value_code = self._gen_expr(stmt.value)
+            result.append(f'{ind}NgSetMember(runtime, {obj_code}, runtime->constants[{stmt.attr}], {value_code});')
+
+        elif isinstance(stmt, AssignIR):
             # Variable assignment
             expr_code = self._gen_expr(stmt.value)
             # Check if variable is already declared
@@ -378,7 +403,7 @@ class LLVMBackend:
                 result.append(f'{ind}{stmt.target} = {expr_code};')
             else:
                 # First declaration
-                result.append(f'{ind}int64_t {stmt.target} = {expr_code};')
+                result.append(f'{ind}Object* {stmt.target} = {expr_code};')
                 self.declared_vars.add(stmt.target)
         
         elif isinstance(stmt, ReturnIR):
@@ -570,12 +595,12 @@ class LLVMBackend:
             index_code = self._gen_expr(expr.index)
             return f'{obj_code}[{index_code}]'
         
-        elif isinstance(expr, ConstructorCallIR):
+        elif isinstance(expr, ConstructorCallIR): # TODO:
             # Constructor call (ClassName(...))
             # Generate call to create_classname() function
-            func_name = f'{expr.class_name}___init__'
+            func_name = f'NgAlloc{expr.class_name}'
             args_code = ', '.join([self._gen_expr(arg) for arg in expr.args])
-            return f'{func_name}({args_code})'
+            return f'{func_name}(runtime, {args_code})'
         
         elif isinstance(expr, LambdaIR):
             # Lambda expression - generate as inline anonymous function

@@ -38,7 +38,7 @@ void* alloc(Runtime* runtime, size_t size, bool* is_manual, int* pool_id, bool z
 void del(Runtime* runtime, void* ptr, bool is_manual, int pool_id);
 Object* alloc_str(Runtime* runtime, const char* data);
 Object* alloc_int(Runtime* runtime, int64_t value);
-Object* alloc_double(Runtime* runtime, double value);
+Object* alloc_float(Runtime* runtime, double value);
 Object* alloc_bytes(Runtime* runtime, const char* data, size_t len);
 Object* alloc_function(Runtime* runtime, const char* name, int32_t line, size_t arg_count, void* native_ptr);
 Object* alloc_tuple(Runtime* runtime, size_t size, Object** objects);
@@ -46,13 +46,24 @@ Object* alloc_list(Runtime* runtime);
 Object* alloc_instance(Runtime* runtime);
 Object* alloc_object(Runtime* runtime, int32_t typename);
 Dict* alloc_dict(Runtime* runtime);
-int dict_set(Runtime* runtime, Dict* d, Object* key, Object* value);
-Object* dict_get(Runtime* runtime, Dict* d, Object* key);
-bool dict_del(Runtime* runtime, Dict* d, Object* key);
-void dict_destroy(Runtime* runtime, Dict* d);
+int dict_set(Runtime* runtime, void* dd, void* kk, void* vv);
+Object* dict_get(Runtime* runtime, void* d, void* key);
+bool dict_del(Runtime* runtime, void* d, void* key);
+void dict_destroy(Runtime* runtime, void* d);
 void DECREF(Runtime* runtime, void* obj);
-void* INCREF(void* obj);
+void* INCREF(Runtime* runtime, void* obj);
 int64_t hash(Runtime* runtime, Object* obj);
+const char* obj_type_name(void* oo);
+Object* NgAdd(Runtime* runtime, void* aa, void* bb);
+Object* NgSub(Runtime* runtime, void* aa, void* bb);
+Object* NgMul(Runtime* runtime, void* aa, void* bb);
+Object* NgTrueDiv(Runtime* runtime, void* aa, void* bb);
+Object* NgFloorDiv(Runtime* runtime, void* aa, void* bb);
+Object* NgGetMember(Runtime* runtime, void* ii, void* mm);
+Object* NgMod(Runtime* runtime, void* aa, void* bb);
+Object* NgPow(Runtime* runtime, void* aa, void* bb);
+void NgSetMember(Runtime* runtime, void* ii, void* mm, void* vv);
+void NgDelMember(Runtime* runtime, InstanceObject* instance, StringObject* member);
 
 #if defined(__linux__) || defined(__unix__)
 void siphash_random_key(uint8_t key[16]) {
@@ -416,14 +427,19 @@ int64_t hash_float(FloatObject* fobj) {
 
 /* NgMember functions and dict functions - implementations provided after Runtime struct */
 
-Object* NgGetMember(Runtime* runtime, InstanceObject* instance, StringObject* member) {
+Object* NgGetMember(Runtime* runtime, void* ii, void* mm) {
+    InstanceObject* instance = (InstanceObject*)ii;
+    StringObject* member = (StringObject*)mm;
     Dict* dict = instance->__dict__;
     if (!dict) return NULL;
 
     return dict_get(runtime, dict, (Object*)member);
 }
 
-void NgSetMember(Runtime* runtime, InstanceObject* instance, StringObject* member, Object* value) {
+void NgSetMember(Runtime* runtime, void* ii, void* mm, void* vv) {
+    InstanceObject* instance = (InstanceObject*)ii;
+    StringObject* member = (StringObject*)mm;
+    Object* value = (Object*)vv;
     Dict* dict = instance->__dict__;
     if (!dict) {
         dict = alloc_dict(runtime);
@@ -440,7 +456,10 @@ void NgDelMember(Runtime* runtime, InstanceObject* instance, StringObject* membe
     dict_del(runtime, dict, (Object*)member);
 }
 
-inline Object* NgAdd(Runtime* runtime, Object* a, Object* b) {
+inline Object* NgAdd(Runtime* runtime, void* aa, void* bb) {
+    Object* a = (Object*)aa;
+    Object* b = (Object*)bb;
+
     // Handle integer addition
     if (a->__flags__.type == OBJ_TYPE_INT && b->__flags__.type == OBJ_TYPE_INT) {
         IntObject* int_a = (IntObject*)a;
@@ -462,7 +481,7 @@ inline Object* NgAdd(Runtime* runtime, Object* a, Object* b) {
                         : (double)((IntObject*)b)->__value__;
         
         double result = val_a + val_b;
-        return alloc_double(runtime, result);
+        return alloc_float(runtime, result);
     }
 
     // Unsupported types
@@ -474,7 +493,10 @@ inline Object* NgAdd(Runtime* runtime, Object* a, Object* b) {
     exit(1);
 }
 
-inline Object* NgSub(Runtime* runtime, Object* a, Object* b) {
+inline Object* NgSub(Runtime* runtime, void* aa, void* bb) {
+    Object* a = (Object*)aa;
+    Object* b = (Object*)bb;
+    
     // Handle integer subtraction
     if (a->__flags__.type == OBJ_TYPE_INT && b->__flags__.type == OBJ_TYPE_INT) {
         IntObject* int_a = (IntObject*)a;
@@ -496,7 +518,7 @@ inline Object* NgSub(Runtime* runtime, Object* a, Object* b) {
                         : (double)((IntObject*)b)->__value__;
         
         double result = val_a - val_b;
-        return alloc_double(runtime, result);
+        return alloc_float(runtime, result);
     }
 
     // Unsupported types
@@ -508,7 +530,10 @@ inline Object* NgSub(Runtime* runtime, Object* a, Object* b) {
     exit(1);
 }
 
-inline Object* NgMul(Runtime* runtime, Object* a, Object* b) {
+inline Object* NgMul(Runtime* runtime, void* aa, void* bb) {
+    Object* a = (Object*)aa;
+    Object* b = (Object*)bb;
+    
     // Handle integer multiplication
     if (a->__flags__.type == OBJ_TYPE_INT && b->__flags__.type == OBJ_TYPE_INT) {
         IntObject* int_a = (IntObject*)a;
@@ -530,7 +555,7 @@ inline Object* NgMul(Runtime* runtime, Object* a, Object* b) {
                         : (double)((IntObject*)b)->__value__;
         
         double result = val_a * val_b;
-        return alloc_double(runtime, result);
+        return alloc_float(runtime, result);
     }
 
     // Unsupported types
@@ -542,7 +567,10 @@ inline Object* NgMul(Runtime* runtime, Object* a, Object* b) {
     exit(1);
 }
 
-inline Object* NgTrueDiv(Runtime* runtime, Object* a, Object* b) {
+inline Object* NgTrueDiv(Runtime* runtime, void* aa, void* bb) {
+    Object* a = (Object*)aa;
+    Object* b = (Object*)bb;
+    
     // Handle integer division
     if (a->__flags__.type == OBJ_TYPE_INT && b->__flags__.type == OBJ_TYPE_INT) {
         IntObject* int_a = (IntObject*)a;
@@ -552,7 +580,7 @@ inline Object* NgTrueDiv(Runtime* runtime, Object* a, Object* b) {
             exit(1);
         }
         double result = (double)int_a->__value__ / (double)int_b->__value__;
-        return alloc_double(runtime, result);
+        return alloc_float(runtime, result);
     }
 
     // Handle float division
@@ -573,7 +601,7 @@ inline Object* NgTrueDiv(Runtime* runtime, Object* a, Object* b) {
         }
         
         double result = val_a / val_b;
-        return alloc_double(runtime, result);
+        return alloc_float(runtime, result);
     }
 
     // Unsupported types
@@ -585,7 +613,10 @@ inline Object* NgTrueDiv(Runtime* runtime, Object* a, Object* b) {
     exit(1);
 }
 
-inline Object* NgFloorDiv(Runtime* runtime, Object* a, Object* b) {
+inline Object* NgFloorDiv(Runtime* runtime, void* aa, void* bb) {
+    Object* a = (Object*)aa;
+    Object* b = (Object*)bb;
+    
     // Handle integer floor division
     if (a->__flags__.type == OBJ_TYPE_INT && b->__flags__.type == OBJ_TYPE_INT) {
         IntObject* int_a = (IntObject*)a;
@@ -620,7 +651,7 @@ inline Object* NgFloorDiv(Runtime* runtime, Object* a, Object* b) {
         }
         
         double result = floor(val_a / val_b);
-        return alloc_double(runtime, result);
+        return alloc_float(runtime, result);
     }
 
     // Unsupported types
@@ -632,7 +663,10 @@ inline Object* NgFloorDiv(Runtime* runtime, Object* a, Object* b) {
     exit(1);
 }
 
-inline Object* NgMod(Runtime* runtime, Object* a, Object* b) {
+inline Object* NgMod(Runtime* runtime, void* aa, void* bb) {
+    Object* a = (Object*)aa;
+    Object* b = (Object*)bb;
+    
     // Handle integer modulo
     if (a->__flags__.type == OBJ_TYPE_INT && b->__flags__.type == OBJ_TYPE_INT) {
         IntObject* int_a = (IntObject*)a;
@@ -669,7 +703,7 @@ inline Object* NgMod(Runtime* runtime, Object* a, Object* b) {
         if ((result != 0.0) && ((val_b < 0.0) != (result < 0.0))) {
             result += val_b;
         }
-        return alloc_double(runtime, result);
+        return alloc_float(runtime, result);
     }
 
     // Unsupported types
@@ -1134,7 +1168,7 @@ Runtime* init_runtime() {
     runtime->builtin_names.__getnewargs_ex__= (StringObject*) alloc_str(runtime, "__getnewargs_ex__");
     runtime->builtin_names.__sizeof__       = (StringObject*) alloc_str(runtime, "__sizeof__");
 
-    runtime->classes = alloc_dict(runtime);
+    runtime->classes = (Object*) alloc_dict(runtime);
     return runtime;
 }
 
@@ -1228,6 +1262,7 @@ static inline Object* NgCall(Runtime* runtime, Function* func, Tuple* args, Dict
 
 /* Hash function */
 int64_t hash(Runtime* runtime, Object* obj) {
+    if (!obj) return 0;
     int32_t obj_type = obj->__flags__.type;
 
     switch (obj_type) {
@@ -1303,7 +1338,7 @@ Dict* alloc_dict(Runtime* runtime) {
     return d;
 }
 
-static bool _dict_resize(Dict* d, size_t new_capacity) {
+static bool _dict_resize(Runtime* runtime, Dict* d, size_t new_capacity) {
     dict_entry_t* old_entries = d->entries;
     size_t old_capacity = d->capacity;
 
@@ -1342,11 +1377,13 @@ static bool _dict_resize(Dict* d, size_t new_capacity) {
         }
     }
 
-    free(old_entries);
+    del(runtime, old_entries, d->__allocation__.is_manual == 1, d->__allocation__.pool_id);
     return true;
 }
 
-Object* NgPow(Runtime* runtime, Object* base, Object* exp) {
+Object* NgPow(Runtime* runtime, void* bb, void* ee) {
+    Object* base = (Object*)bb;
+    Object* exp  = (Object*)ee;
 
     // ---- int ** int ----
     if (base->__flags__.type == OBJ_TYPE_INT &&
@@ -1403,9 +1440,13 @@ Object* NgPow(Runtime* runtime, Object* base, Object* exp) {
     exit(1);
 }
 
-int dict_set(Runtime* runtime, Dict* d, Object* key, Object* value) {
+int dict_set(Runtime* runtime, void* dd, void* kk, void* vv) {
+    Dict* d = (Dict*)dd;
+    Object* key = (Object*)kk;
+    Object* value = (Object*)vv;
+
     if (d->count >= d->threshold) {
-        if (!_dict_resize(d, d->capacity * 2)) return -1;
+        if (!_dict_resize(runtime, d, d->capacity * 2)) return -1;
     }
 
     int64_t h = hash(runtime, key);
@@ -1417,18 +1458,24 @@ int dict_set(Runtime* runtime, Dict* d, Object* key, Object* value) {
     while (true) {
         dict_entry_t* curr = &d->entries[idx];
 
-        if (curr->psl == 0) {
+        if (curr->psl == 0) { // key not found, insert here
             *curr = entry;
             d->count++;
+            INCREF(runtime, key);
+            INCREF(runtime, value);
             return 0;
         }
 
-        if (curr->hash == h && ObjectsEqual(curr->key, key)) {
+        if (curr->hash == h && ObjectsEqual(curr->key, key)) { // key found, update value
             curr->value = value;
+            if (curr->value != value) {
+                if (curr->value) DECREF(runtime, curr->value);
+                INCREF(runtime, value);
+            }
             return 0;
         }
 
-        if (entry.psl > curr->psl) {
+        if (entry.psl > curr->psl) { // Robin Hood swapping, continue probing
             dict_entry_t temp = *curr;
             *curr = entry;
             entry = temp;
@@ -1439,7 +1486,10 @@ int dict_set(Runtime* runtime, Dict* d, Object* key, Object* value) {
     }
 }
 
-Object* dict_get(Runtime* runtime, Dict* d, Object* key) {
+Object* dict_get(Runtime* runtime, void* dd, void* kk) {
+    Dict* d = (Dict*)dd;
+    Object* key = (Object*)kk;
+
     int64_t h = hash(runtime, key);
     size_t idx = (size_t)h & d->mask;
     uint32_t psl = 1;
@@ -1460,7 +1510,10 @@ Object* dict_get(Runtime* runtime, Dict* d, Object* key) {
     }
 }
 
-bool dict_del(Runtime* runtime, Dict* d, Object* key) {
+bool dict_del(Runtime* runtime, void* dd, void* kk) {
+    Dict* d = (Dict*)dd;
+    Object* key = (Object*)kk;
+
     int64_t h = hash(runtime, key);
     size_t idx = (size_t)h & d->mask;
     uint32_t psl = 1;
@@ -1495,7 +1548,8 @@ bool dict_del(Runtime* runtime, Dict* d, Object* key) {
     }
 }
 
-void dict_destroy(Runtime* runtime, Dict* d) {
+void dict_destroy(Runtime* runtime, void* dd) {
+    Dict* d = (Dict*)dd;
     if (!d) return;
 
     for (size_t i = 0; i < d->capacity; i++) {
@@ -1508,6 +1562,22 @@ void dict_destroy(Runtime* runtime, Dict* d) {
     free(d->entries);
     free(d);
 }
+
+// Object* NgAllocNew(Runtime* runtime, Object* cls) {
+//     if (cls->__flags__.type != OBJ_TYPE_CLASS) {
+//         fprintf(stderr, "TypeError: Expected class object for __new__\n");
+//         exit(1);
+//     }
+
+//     InstanceObject* cls_obj = (InstanceObject*)cls;
+//     InstanceObject* __new__ = (InstanceObject*)dict_get(runtime, cls_obj->__dict__, runtime->builtin_names.__new__);
+//     if (!__new__ || __new__->__base.__flags__.type != OBJ_TYPE_FUNCTION) {
+//         fprintf(stderr, "TypeError: __new__ method not found or invalid\n");
+//         exit(1);
+//     }
+
+//     return NgCall(runtime, (Function*)__new__, NULL, NULL);
+// }
 
 
 /* Create a new Object */
@@ -1555,7 +1625,7 @@ Object* alloc_int(Runtime* runtime, int64_t value) {
     return (Object*)obj;
 }
 
-Object* alloc_double(Runtime* runtime, double value) {
+Object* alloc_float(Runtime* runtime, double value) {
     FloatObject* obj = (FloatObject*) dynamic_pool_alloc(runtime->pool->floats);
     obj->base.__typename__ = get_symbol_id(runtime, "double");
     obj->base.__refcount__ = 1;
@@ -1702,7 +1772,30 @@ Object* alloc_list(Runtime* runtime) {
     return (Object*)list;
 }
 
-void* INCREF(void* obj) {
+const char* obj_type_names[] = {
+    "object",
+    "instance",
+    "int",
+    "float",
+    "str",
+    "bytes",
+    "tuple",
+    "list",
+    "dict",
+    "function",
+    "set"
+};
+
+const char* obj_type_name(void* oo) {
+    Object* obj = (Object*)oo;
+    int32_t type = obj->__flags__.type;
+    if (type >= 0 && type < sizeof(obj_type_names) / sizeof(obj_type_names[0])) {
+        return obj_type_names[type];
+    }
+    return "unknown";
+}
+
+void* INCREF(Runtime* runtime, void* obj) {
     if (obj != NULL) {
         Object* o = (Object*)obj;
         o->__refcount__++;

@@ -52,6 +52,12 @@ class CallIR(ExprIR):
     is_method: bool = False
     obj: Optional[ExprIR] = None  # For method calls
 
+@dataclass
+class SetAttrIR(ExprIR):
+    """Set attribute (obj.attr = value)"""
+    obj: ExprIR
+    attr: str
+    value: ExprIR
 
 @dataclass
 class AttributeIR(ExprIR):
@@ -182,52 +188,90 @@ class NaginiIR:
         self.main_body: List[StmtIR] = []
         self.const_count = 0
         self.consts = {}
+        self.consts_dict = {}
         
         # Cache for converted methods to avoid double conversion
         self.method_ir_cache = {}
 
     def register_string_constant(self, value: str) -> str:
         """Register a string constant and return its unique name"""
-        print("Registering string constant:", value)
+        if value in self.consts_dict:
+            return self.consts_dict[value]
         ident = self.const_count
-        self.consts[ident] = (f'"{value}"', 'alloc_string')
+        self.consts[ident] = (f'"{value}"', 'alloc_str')
         self.const_count += 1
+        self.consts_dict[value] = ident
         return ident
     
     def register_int_constant(self, value: int) -> str:
         """Register an integer constant and return its unique name"""
+        if value in self.consts_dict:
+            return self.consts_dict[value]
         ident = self.const_count
         self.consts[ident] = (value, 'alloc_int')
         self.const_count += 1
+        self.consts_dict[value] = ident
         return ident
     
     def register_float_constant(self, value: float) -> str:
         """Register a float constant and return its unique name"""
+        if value in self.consts_dict:
+            return self.consts_dict[value]
         ident = self.const_count
         self.consts[ident] = (value, 'alloc_float')
         self.const_count += 1
+        self.consts_dict[value] = ident
         return ident
     
     def register_bytes_constant(self, value: bytes) -> str:
         """Register a bytes constant and return its unique name"""
+        if value in self.consts_dict:
+            return self.consts_dict[value]
         ident = self.const_count
         self.consts[ident] = (value, 'alloc_bytes')
         self.const_count += 1
+        self.consts_dict[value] = ident
         return ident
     
     def register_bool_constant(self, value: int) -> str:
         """Register a boolean constant and return its unique name"""
+        if value in self.consts_dict:
+            return self.consts_dict[value]
         ident = self.const_count
         self.consts[ident] = (value, 'alloc_bool')
         self.const_count += 1
+        self.consts_dict[value] = ident
         return ident
+    
+    def register_class_constant(self, class_info: ClassInfo):
+        """Register a class constant"""
+        if str(class_info) in self.consts_dict:
+            return self.consts_dict[str(class_info)]
+        class_name = class_info.name
+        ident = self.const_count
+        self.consts[ident] = class_info
+        self.const_count += 1
+        class_info.class_id = ident
+        self.consts_dict[str(class_info)] = ident
+        return ident
+
+    # def register_method_constant(self, method_info: FunctionInfo) -> str:
+    #     """Register a method constant"""
+    #     method_name = method_info.name
+    #     ident = self.const_count
+    #     self.consts[ident] = method_info
+    #     self.const_count += 1
+    #     method_info.method_id = ident
+    #     return ident
     
     def generate(self) -> 'NaginiIR':
         """Generate IR from parsed classes and functions"""
         # Convert class methods to IR first (to register all constants)
         for class_name, class_info in self.classes.items():
             self.classes[class_name].name_id = self.register_string_constant(class_name)
+            self.register_class_constant(class_info)
             for method_info in class_info.methods:
+                method_info.name_id = self.register_string_constant(method_info.name)
                 # Convert method to IR to register any constants used
                 method_ir = self._convert_function_to_ir(method_info)
                 # Cache the method IR for later use by backend
@@ -323,6 +367,20 @@ class NaginiIR:
                 target = stmt.targets[0].id
                 value = self._convert_expr_to_ir(stmt.value)
                 return AssignIR(target, value)
+            else:
+                for target in stmt.targets:
+                    if isinstance(target, ast.Name):
+                        tgt = target.id
+                        val = self._convert_expr_to_ir(stmt.value)
+                        return AssignIR(tgt, val)
+                    elif isinstance(target, ast.Tuple):
+                        raise NotImplementedError("Tuple unpacking in assignments is not supported yet.")
+                    elif isinstance(target, ast.Attribute):
+                        # Attribute assignment (e.g., obj.attr = value)
+                        obj_ir = self._convert_expr_to_ir(target.value)
+                        attr_name = self.register_string_constant(target.attr)
+                        value_ir = self._convert_expr_to_ir(stmt.value)
+                        return SetAttrIR(obj_ir, attr_name, value_ir)
         
         elif isinstance(stmt, ast.AnnAssign):
             # Annotated assignment (e.g., x: int = 5)

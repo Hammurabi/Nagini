@@ -57,7 +57,7 @@ class FunctionInfo:
     strict_params: List[str] = field(default_factory=list)  # Parameters with type annotations (enables runtime checking)
     line_no: int = 0  # Line number in source code (for debugging and error messages)
     is_static: bool = False  # Whether this is a static method (no self parameter)
-
+    name_id: Optional[int] = None  # Unique identifier for the function name (set during IR generation)
 
 @dataclass
 class ClassInfo:
