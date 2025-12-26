@@ -1490,17 +1490,7 @@ inline Object* NgCall(Runtime* runtime, void* ffunc, void* aargs, void* kkwargs)
         exit(1);
     }
     
-    // Handle instance methods with single parameter (self)
-    // These are called with signature: Object* method(Runtime*, Object* self)
-    if (func->arg_count == 1 && args && args->size == 1) {
-        Object* (*method_func)(Runtime*, Object*) = (Object* (*)(Runtime*, Object*))func->native_ptr;
-        Object* result = method_func(runtime, args->items[0]);
-        if (args) DECREF(runtime, (Object*)args);
-        if (kwargs) DECREF(runtime, (Object*)kwargs);
-        return result;
-    }
-    
-    // Handle regular functions with tuple/dict signature
+    // All functions now use tuple/dict signature
     Object* (*native_func)(Runtime*, Tuple*, Dict*) = (Object* (*)(Runtime*, Tuple*, Dict*))func->native_ptr;
     Object* result = native_func(runtime, args, kwargs);
     if (args) DECREF(runtime, (Object*)args);
