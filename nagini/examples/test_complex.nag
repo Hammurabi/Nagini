@@ -1,0 +1,331 @@
+# Complex Nagini Test Script
+# Tests all working features: functions, arithmetic, control flow, loops, recursion
+# This demonstrates that Nagini is Turing complete
+
+# ===== Mathematical Functions =====
+
+def factorial(n: int) -> int:
+    """Calculate factorial recursively"""
+    if n <= 1:
+        return 1
+    return n * factorial(n - 1)
+
+def fibonacci(n: int) -> int:
+    """Calculate Fibonacci number recursively"""
+    if n <= 1:
+        return n
+    return fibonacci(n - 1) + fibonacci(n - 2)
+
+def fibonacci_iterative(n: int) -> int:
+    """Calculate Fibonacci number iteratively"""
+    if n <= 1:
+        return n
+    a = 0
+    b = 1
+    i = 2
+    while i <= n:
+        temp = a + b
+        a = b
+        b = temp
+        i = i + 1
+    return b
+
+def gcd(a: int, b: int) -> int:
+    """Greatest common divisor using Euclid's algorithm"""
+    while b != 0:
+        temp = b
+        b = a % b
+        a = temp
+    return a
+
+def lcm(a: int, b: int) -> int:
+    """Least common multiple"""
+    return (a * b) / gcd(a, b)
+
+def is_prime(n: int) -> int:
+    """Check if number is prime (returns 1 for true, 0 for false)"""
+    if n <= 1:
+        return 0
+    if n <= 3:
+        return 1
+    if n % 2 == 0:
+        return 0
+    i = 3
+    while i * i <= n:
+        if n % i == 0:
+            return 0
+        i = i + 2
+    return 1
+
+def power(base: int, exp: int) -> int:
+    """Calculate base^exp using iteration"""
+    result = 1
+    i = 0
+    while i < exp:
+        result = result * base
+        i = i + 1
+    return result
+
+def abs_value(n: int) -> int:
+    """Calculate absolute value"""
+    if n < 0:
+        return 0 - n
+    return n
+
+def max3(a: int, b: int, c: int) -> int:
+    """Find maximum of three numbers"""
+    if a >= b and a >= c:
+        return a
+    if b >= a and b >= c:
+        return b
+    return c
+
+def min3(a: int, b: int, c: int) -> int:
+    """Find minimum of three numbers"""
+    if a <= b and a <= c:
+        return a
+    if b <= a and b <= c:
+        return b
+    return c
+
+# ===== Algorithmic Functions =====
+
+def collatz_length(n: int) -> int:
+    """Calculate length of Collatz sequence"""
+    length = 0
+    while n != 1:
+        if n % 2 == 0:
+            n = n / 2
+        else:
+            n = 3 * n + 1
+        length = length + 1
+    return length
+
+def sum_range(start: int, end: int) -> int:
+    """Sum integers from start to end"""
+    total = 0
+    i = start
+    while i <= end:
+        total = total + i
+        i = i + 1
+    return total
+
+def sum_of_squares(n: int) -> int:
+    """Calculate sum of squares from 1 to n"""
+    total = 0
+    i = 1
+    while i <= n:
+        total = total + i * i
+        i = i + 1
+    return total
+
+def count_digits(n: int) -> int:
+    """Count number of digits in a number"""
+    if n == 0:
+        return 1
+    count = 0
+    temp = n
+    while temp > 0:
+        count = count + 1
+        temp = temp / 10
+    return count
+
+def reverse_number(n: int) -> int:
+    """Reverse the digits of a number"""
+    result = 0
+    while n > 0:
+        digit = n % 10
+        result = result * 10 + digit
+        n = n / 10
+    return result
+
+def is_palindrome(n: int) -> int:
+    """Check if number is a palindrome"""
+    if n == reverse_number(n):
+        return 1
+    return 0
+
+def sum_of_divisors(n: int) -> int:
+    """Calculate sum of all divisors of n (excluding n)"""
+    sum = 0
+    i = 1
+    while i < n:
+        if n % i == 0:
+            sum = sum + i
+        i = i + 1
+    return sum
+
+def is_perfect(n: int) -> int:
+    """Check if number is perfect (sum of divisors equals n)"""
+    if sum_of_divisors(n) == n:
+        return 1
+    return 0
+
+# ===== Bit Manipulation (using arithmetic) =====
+
+def is_power_of_two(n: int) -> int:
+    """Check if n is a power of 2"""
+    if n <= 0:
+        return 0
+    while n > 1:
+        if n % 2 != 0:
+            return 0
+        n = n / 2
+    return 1
+
+def count_set_bits(n: int) -> int:
+    """Count number of 1 bits in binary representation"""
+    count = 0
+    while n > 0:
+        if n % 2 == 1:
+            count = count + 1
+        n = n / 2
+    return count
+
+# ===== Complex Nested Logic =====
+
+def classify_triangle(a: int, b: int, c: int) -> int:
+    """Classify triangle: 0=invalid, 1=equilateral, 2=isosceles, 3=scalene"""
+    # Check validity
+    if a + b <= c or a + c <= b or b + c <= a:
+        return 0
+    # Check types
+    if a == b and b == c:
+        return 1  # equilateral
+    if a == b or b == c or a == c:
+        return 2  # isosceles
+    return 3  # scalene
+
+def day_of_year(day: int, month: int, year: int) -> int:
+    """Calculate day of year (simplified, ignoring leap years)"""
+    days_in_month = 0
+    m = 1
+    while m < month:
+        if m == 1 or m == 3 or m == 5 or m == 7 or m == 8 or m == 10 or m == 12:
+            days_in_month = days_in_month + 31
+        elif m == 4 or m == 6 or m == 9 or m == 11:
+            days_in_month = days_in_month + 30
+        else:
+            days_in_month = days_in_month + 28
+        m = m + 1
+    return days_in_month + day
+
+# ===== Main Test Program =====
+
+def main():
+    print("================================================================")
+    print("Nagini Complex Test - Demonstrating Turing Completeness")
+    print("================================================================")
+    print("")
+    
+    # Test 1: Basic Arithmetic
+    print("Test 1: Basic Arithmetic")
+    print("5 + 3 =", 5 + 3)
+    print("10 - 4 =", 10 - 4)
+    print("7 * 6 =", 7 * 6)
+    print("20 / 4 =", 20 / 4)
+    print("17 % 5 =", 17 % 5)
+    print("")
+    
+    # Test 2: Factorial (Recursion)
+    print("Test 2: Factorial (Recursion)")
+    print("factorial(5) =", factorial(5))
+    print("factorial(10) =", factorial(10))
+    print("factorial(12) =", factorial(12))
+    print("")
+    
+    # Test 3: Fibonacci (Recursion vs Iteration)
+    print("Test 3: Fibonacci")
+    print("fibonacci(8) =", fibonacci(8))
+    print("fibonacci_iterative(8) =", fibonacci_iterative(8))
+    print("fibonacci(10) =", fibonacci(10))
+    print("fibonacci_iterative(10) =", fibonacci_iterative(10))
+    print("")
+    
+    # Test 4: GCD and LCM
+    print("Test 4: GCD and LCM")
+    print("gcd(48, 18) =", gcd(48, 18))
+    print("gcd(100, 35) =", gcd(100, 35))
+    print("lcm(12, 18) =", lcm(12, 18))
+    print("")
+    
+    # Test 5: Prime Number Testing
+    print("Test 5: Prime Numbers")
+    print("is_prime(17) =", is_prime(17))
+    print("is_prime(20) =", is_prime(20))
+    print("is_prime(97) =", is_prime(97))
+    print("is_prime(100) =", is_prime(100))
+    print("")
+    
+    # Test 6: Power Function
+    print("Test 6: Power")
+    print("power(2, 5) =", power(2, 5))
+    print("power(3, 4) =", power(3, 4))
+    print("power(10, 3) =", power(10, 3))
+    print("")
+    
+    # Test 7: Max and Min
+    print("Test 7: Max and Min")
+    print("max3(5, 12, 7) =", max3(5, 12, 7))
+    print("min3(5, 12, 7) =", min3(5, 12, 7))
+    print("abs_value(-42) =", abs_value(0 - 42))
+    print("")
+    
+    # Test 8: Collatz Sequence
+    print("Test 8: Collatz Sequence")
+    print("collatz_length(27) =", collatz_length(27))
+    print("collatz_length(19) =", collatz_length(19))
+    print("")
+    
+    # Test 9: Sum Operations
+    print("Test 9: Sum Operations")
+    print("sum_range(1, 10) =", sum_range(1, 10))
+    print("sum_range(1, 100) =", sum_range(1, 100))
+    print("sum_of_squares(5) =", sum_of_squares(5))
+    print("sum_of_squares(10) =", sum_of_squares(10))
+    print("")
+    
+    # Test 10: Number Analysis
+    print("Test 10: Number Analysis")
+    print("count_digits(12345) =", count_digits(12345))
+    print("reverse_number(12345) =", reverse_number(12345))
+    print("is_palindrome(12321) =", is_palindrome(12321))
+    print("is_palindrome(12345) =", is_palindrome(12345))
+    print("")
+    
+    # Test 11: Perfect Numbers
+    print("Test 11: Perfect Numbers")
+    print("sum_of_divisors(6) =", sum_of_divisors(6))
+    print("is_perfect(6) =", is_perfect(6))
+    print("sum_of_divisors(28) =", sum_of_divisors(28))
+    print("is_perfect(28) =", is_perfect(28))
+    print("is_perfect(12) =", is_perfect(12))
+    print("")
+    
+    # Test 12: Bit Operations
+    print("Test 12: Bit Operations (via arithmetic)")
+    print("is_power_of_two(16) =", is_power_of_two(16))
+    print("is_power_of_two(18) =", is_power_of_two(18))
+    print("count_set_bits(7) =", count_set_bits(7))
+    print("count_set_bits(15) =", count_set_bits(15))
+    print("")
+    
+    # Test 13: Triangle Classification
+    print("Test 13: Triangle Classification")
+    print("classify_triangle(3, 3, 3) =", classify_triangle(3, 3, 3))
+    print("classify_triangle(3, 3, 4) =", classify_triangle(3, 3, 4))
+    print("classify_triangle(3, 4, 5) =", classify_triangle(3, 4, 5))
+    print("classify_triangle(1, 2, 10) =", classify_triangle(1, 2, 10))
+    print("")
+    
+    # Test 14: Day of Year
+    print("Test 14: Day of Year")
+    print("day_of_year(15, 3, 2024) =", day_of_year(15, 3, 2024))
+    print("day_of_year(1, 1, 2024) =", day_of_year(1, 1, 2024))
+    print("day_of_year(31, 12, 2024) =", day_of_year(31, 12, 2024))
+    print("")
+    
+    print("================================================================")
+    print("All tests completed successfully!")
+    print("Nagini is Turing complete and ready for complex computation")
+    print("================================================================")

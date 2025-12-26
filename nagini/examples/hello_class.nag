@@ -1,11 +1,11 @@
-# Nagini Example with Class
-# Demonstrates the @property decorator and class syntax
+# Nagini Example with Simple Program
+# Demonstrates functions and arithmetic
 
-@property(malloc_strategy='pool', layout='cpp', paradigm='object')
-class Vec3:
-    x: float
-    y: float
-    z: float
+def calculate_area(width: int, height: int) -> int:
+    return width * height
 
-# The compiler will generate a struct for Vec3 and a main function
-# that prints "Hello, World!"
+def main():
+    print("Hello from Nagini with functions!")
+    area = calculate_area(10, 5)
+    print("Area of rectangle (10 x 5):", area)
+

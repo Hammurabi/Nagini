@@ -1,32 +1,24 @@
 # Nagini Memory Management Example
-# Demonstrates different allocation strategies and paradigms
+# Demonstrates iterative and recursive algorithms
 
-@property(malloc_strategy='pool', layout='cpp', paradigm='object')
-class GameObject:
-    id: int
-    x: float
-    y: float
-    health: int
+def sum_iterative(n: int) -> int:
+    """Calculate sum of numbers from 1 to n iteratively"""
+    total = 0
+    i = 1
+    while i <= n:
+        total = total + i
+        i = i + 1
+    return total
 
-@property(malloc_strategy='gc', layout='cpp', paradigm='object')
-class Player:
-    name: str
-    level: int
-    score: int
+def sum_recursive(n: int) -> int:
+    """Calculate sum of numbers from 1 to n recursively"""
+    if n <= 0:
+        return 0
+    return n + sum_recursive(n - 1)
 
-@property(malloc_strategy='heap', layout='std430', paradigm='data')
-class Vertex:
-    x: float
-    y: float
-    z: float
-    
-@property(malloc_strategy='pool', layout='cpp', paradigm='data')
-class Component:
-    active: bool
-    type_id: int
+def main():
+    print("Memory Management Example - Iterative vs Recursive")
+    n = 10
+    print("Sum 1 to 10 (iterative):", sum_iterative(n))
+    print("Sum 1 to 10 (recursive):", sum_recursive(n))
 
-# This example demonstrates the different memory strategies:
-# - GameObject uses pool allocation (fastest, automatic cleanup)
-# - Player uses GC allocation (reference counted, automatic)
-# - Vertex uses heap allocation (manual control)
-# - Component uses data paradigm (lightweight, no object header)

@@ -1,5 +1,6 @@
 # Nagini Hello World Example
 # This is a simple hello world program demonstrating the Nagini language
 
-# For the initial version, we'll just use the compiler to generate
-# a hello world program without explicit class definitions
+def main():
+    print("Hello from Nagini!")
+
