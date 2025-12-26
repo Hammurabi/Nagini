@@ -178,7 +178,13 @@ test_constructors
 test_expressions
 .DS_Store
 .vscode/*
-*.dsYmtest_debug
+*.dsYm
+test_debug
 test_minimal
 hello_class
 *.c
+hello_class_dbg
+simple_main
+simple_test
+test_pool
+test_hello*
