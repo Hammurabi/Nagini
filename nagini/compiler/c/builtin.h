@@ -1638,6 +1638,7 @@ Object* NgPow(Runtime* runtime, void* bb, void* ee) {
 
 int dict_set(Runtime* runtime, void* dd, void* kk, void* vv) {
     Dict* d = (Dict*)dd;
+    if (!d) return -1;  // Add NULL check
     Object* key = (Object*)kk;
     Object* value = (Object*)vv;
 
@@ -1684,6 +1685,7 @@ int dict_set(Runtime* runtime, void* dd, void* kk, void* vv) {
 
 Object* dict_get(Runtime* runtime, void* dd, void* kk) {
     Dict* d = (Dict*)dd;
+    if (!d) return NULL;  // Add NULL check
     Object* key = (Object*)kk;
 
     int64_t h = hash(runtime, key);
@@ -1708,6 +1710,7 @@ Object* dict_get(Runtime* runtime, void* dd, void* kk) {
 
 bool dict_del(Runtime* runtime, void* dd, void* kk) {
     Dict* d = (Dict*)dd;
+    if (!d) return false;  // Add NULL check
     Object* key = (Object*)kk;
 
     int64_t h = hash(runtime, key);
@@ -1755,7 +1758,7 @@ void dict_destroy(Runtime* runtime, void* dd) {
         }
     }
     
-    // Free the entries array
+    // Free the entries array (allocated with alloc())
     bool is_manual = d->__allocation__.is_manual == 1;
     int pool_id = d->__allocation__.pool_id;
     del(runtime, d->entries, is_manual, pool_id);

@@ -17,7 +17,7 @@ class Vec3:
 
 if __name__ == "__main__":
     v = Vec3(1.0, 2.0, 3.0)
-    print(v.magnitude())
+    print(v)
     # with nexc('cpu', capture=[v]) as optim: # or gpu
     #     array = optim.array(300, type=float)
     #     for i in range(100):
