@@ -170,10 +170,10 @@ class LLVMBackend:
         self.output_code.append('/* Check argument count for function calls */')
         self.output_code.append('void check_arg_count(Runtime* runtime, const char* func_name, int64_t expected, int64_t actual, uint8_t has_varargs) {')
         self.output_code.append('    if (!has_varargs && actual != expected) {')
-        self.output_code.append('        fprintf(stderr, "Runtime Error: Function \'%s\' expects %lld arguments but got %lld\\n", func_name, expected, actual);')
+        self.output_code.append('        fprintf(stderr, "Runtime Error: Function \'%s\' expects %ld arguments but got %ld\\n", func_name, expected, actual);')
         self.output_code.append('        exit(1);')
         self.output_code.append('    } else if (has_varargs && actual < expected) {')
-        self.output_code.append('        fprintf(stderr, "Runtime Error: Function \'%s\' expects at least %lld arguments but got %lld\\n", func_name, expected, actual);')
+        self.output_code.append('        fprintf(stderr, "Runtime Error: Function \'%s\' expects at least %ld arguments but got %ld\\n", func_name, expected, actual);')
         self.output_code.append('        exit(1);')
         self.output_code.append('    }')
         self.output_code.append('}')
@@ -402,8 +402,8 @@ class LLVMBackend:
                 # Already declared, just assign
                 result.append(f'{ind}{stmt.target} = {expr_code};')
             else:
-                # First declaration
-                result.append(f'{ind}Object* {stmt.target} = {expr_code};')
+                # First declaration - use int64_t for now (TODO: proper type inference)
+                result.append(f'{ind}int64_t {stmt.target} = {expr_code};')
                 self.declared_vars.add(stmt.target)
         
         elif isinstance(stmt, ReturnIR):
@@ -462,13 +462,19 @@ class LLVMBackend:
     def _gen_expr(self, expr: ExprIR) -> str:
         """Generate C code for an expression IR node"""
         if isinstance(expr, ConstantIR):
+            # For primitives, emit literal values directly instead of Object references
             if expr.type_name == 'int':
-                return f'runtime->constants[{expr.value}]'
+                # Look up the actual value from ir.consts
+                actual_value = self.ir.consts[expr.value][0]
+                return str(actual_value)
             elif expr.type_name == 'float':
-                return f'runtime->constants[{expr.value}]'
+                actual_value = self.ir.consts[expr.value][0]
+                return str(actual_value)
             elif expr.type_name == 'bool':
-                return f'runtime->constants[{expr.value}]'
+                actual_value = self.ir.consts[expr.value][0]
+                return str(actual_value)
             elif expr.type_name == 'str':
+                # Strings need to be kept as runtime constants for memory management
                 return f'runtime->constants[{expr.value}]'
             elif expr.type_name == 'bytes':
                 return f'runtime->constants[{expr.value}]'
@@ -484,34 +490,20 @@ class LLVMBackend:
             left_code = self._gen_expr(expr.left)
             right_code = self._gen_expr(expr.right)
             
-            # Map operators
+            # For primitive operations, use direct C operators
+            # Map operators to C equivalents
             op_map = {
                 'and': '&&',
                 'or': '||',
-                '**': 'pow',  # Will need to handle specially
             }
             op = op_map.get(expr.op, expr.op)
-            op_funcs = {
-                '+': 'NgAdd',
-                '-': 'NgSub',
-                '*': 'NgMul',
-                '/': 'NgDiv',
-                '%': 'NgMod',
-                '==': 'NgEq',
-                '!=': 'NgNeq',
-                '<': 'NgLt',
-                '<=': 'NgLeq',
-                '>': 'NgGt',
-                '>=': 'NgGeq',
-                'and': 'NgAnd',
-                'or': 'NgOr',
-            }
             
+            # Special case for power operation
             if expr.op == '**':
-                # Power operation needs pow() function
-                return f'NgPow(runtime, {left_code}, {right_code})'
+                return f'pow({left_code}, {right_code})'
             else:
-                return f'{op_funcs[op]}(runtime, {left_code}, {right_code})'
+                # Use direct C operators for primitives
+                return f'({left_code} {op} {right_code})'
         
         elif isinstance(expr, UnaryOpIR):
             # Unary operation
@@ -550,9 +542,10 @@ class LLVMBackend:
                         if isinstance(arg, ConstantIR):
                             if arg.type_name == 'str':
                                 format_parts.append('%s')
-                                args_list.append(arg_code)
+                                # For string constants, cast Object* to UnicodeObject* and get data
+                                args_list.append(f'((UnicodeObject*){arg_code})->data')
                             elif arg.type_name == 'int':
-                                format_parts.append('%lld')
+                                format_parts.append('%ld')
                                 args_list.append(arg_code)
                             elif arg.type_name == 'float':
                                 format_parts.append('%f')
@@ -562,11 +555,11 @@ class LLVMBackend:
                                 args_list.append(arg_code)
                         elif isinstance(arg, VariableIR):
                             # Assume int64_t for variables
-                            format_parts.append('%lld')
+                            format_parts.append('%ld')
                             args_list.append(arg_code)
                         else:
                             # Default to int format
-                            format_parts.append('%lld')
+                            format_parts.append('%ld')
                             args_list.append(arg_code)
                     
                     format_str = ' '.join(format_parts)
@@ -667,7 +660,7 @@ class LLVMBackend:
             for compiler in compilers:
                 try:
                     result = subprocess.run(
-                        [compiler, c_file, '-o', output_path],
+                        [compiler, c_file, '-o', output_path, '-lm'],
                         capture_output=True,
                         text=True
                     )
