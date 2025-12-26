@@ -216,22 +216,28 @@ class NaginiIR:
     
     def register_int_constant(self, value: int) -> str:
         """Register an integer constant and return its unique name"""
-        if value in self.consts_dict:
-            return self.consts_dict[value]
+        # Use tuple key (type, value) to avoid collision between int and float
+        # e.g., 2 (int) and 2.0 (float) should be different constants
+        key = ('int', value)
+        if key in self.consts_dict:
+            return self.consts_dict[key]
         ident = self.const_count
         self.consts[ident] = (value, 'alloc_int')
         self.const_count += 1
-        self.consts_dict[value] = ident
+        self.consts_dict[key] = ident
         return ident
     
     def register_float_constant(self, value: float) -> str:
         """Register a float constant and return its unique name"""
-        if value in self.consts_dict:
-            return self.consts_dict[value]
+        # Use tuple key (type, value) to avoid collision between int and float
+        # e.g., 2 (int) and 2.0 (float) should be different constants
+        key = ('float', value)
+        if key in self.consts_dict:
+            return self.consts_dict[key]
         ident = self.const_count
         self.consts[ident] = (value, 'alloc_float')
         self.const_count += 1
-        self.consts_dict[value] = ident
+        self.consts_dict[key] = ident
         return ident
     
     def register_bytes_constant(self, value: bytes) -> str:
@@ -246,12 +252,15 @@ class NaginiIR:
     
     def register_bool_constant(self, value: int) -> str:
         """Register a boolean constant and return its unique name"""
-        if value in self.consts_dict:
-            return self.consts_dict[value]
+        # Use tuple key (type, value) to avoid collision with int
+        # e.g., 0 (int) and False (bool) should be different constants
+        key = ('bool', value)
+        if key in self.consts_dict:
+            return self.consts_dict[key]
         ident = self.const_count
         self.consts[ident] = (value, 'alloc_bool')
         self.const_count += 1
-        self.consts_dict[value] = ident
+        self.consts_dict[key] = ident
         return ident
     
     def register_class_constant(self, class_info: ClassInfo):
