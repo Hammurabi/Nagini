@@ -538,8 +538,6 @@ Object* NgGetItem(Runtime* runtime, void* obj, void* index) {
             );
             exit(1);
     }
-
-    return NULL;
 }
 
 void NgSetItem(Runtime* runtime, void* obj, void* index, void* value) {
@@ -559,11 +557,12 @@ void NgSetItem(Runtime* runtime, void* obj, void* index, void* value) {
                 exit(1);
             }
             if (list->items[idx] != value) {
-                if (list->items[idx]) {
-                    DECREF(runtime, list->items[idx]);
-                }
-                list->items[idx] = (Object*)value;
+                Object* old_value = list->items[idx];
                 INCREF(runtime, value);
+                list->items[idx] = (Object*)value;
+                if (old_value) {
+                    DECREF(runtime, old_value);
+                }
             }
             return;
         }
