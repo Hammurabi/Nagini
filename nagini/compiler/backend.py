@@ -37,6 +37,8 @@ class LLVMBackend:
         self.output_code = []
         self.declared_vars = set()  # Track declared variables
         self.main_function: Optional[FunctionIR] = None
+        self._zero_const_id: Optional[int] = None
+        self._one_const_id: Optional[int] = None
         
     def generate(self) -> str:
         """
@@ -45,6 +47,9 @@ class LLVMBackend:
         """
         print("Generating C code from Nagini IR...")
         self.output_code = []
+
+        # Ensure commonly used loop constants exist before headers are emitted
+        self._pre_register_loop_constants()
         
         # Generate hash table implementation
         self._gen_hmap()
@@ -85,6 +90,54 @@ class LLVMBackend:
 
         self.output_code = output_code + self.output_code
         return '\n'.join(self.output_code)
+
+    def _ensure_int_const(self, value: int) -> int:
+        """Ensure an int constant is registered and return its id."""
+        key = ('int', value)
+        if key in self.ir.consts_dict:
+            return self.ir.consts_dict[key]
+        return self.ir.register_int_constant(value)
+
+    def _pre_register_loop_constants(self):
+        """Pre-register int constants needed by for-range lowering (0 and 1)."""
+        need_zero = False
+        need_one = False
+
+        def scan_stmts(stmts):
+            nonlocal need_zero, need_one
+            for stmt in stmts:
+                if isinstance(stmt, ForIR) and isinstance(stmt.iter_expr, CallIR) and stmt.iter_expr.func_name == 'range':
+                    argc = len(stmt.iter_expr.args)
+                    if argc == 1:
+                        need_zero = True
+                        need_one = True
+                    elif argc == 2:
+                        need_one = True
+                # Recurse into nested bodies
+                if isinstance(stmt, IfIR):
+                    scan_stmts(stmt.then_body)
+                    for _, body in stmt.elif_parts:
+                        scan_stmts(body)
+                    if stmt.else_body:
+                        scan_stmts(stmt.else_body)
+                elif isinstance(stmt, WhileIR):
+                    scan_stmts(stmt.body)
+                elif isinstance(stmt, ForIR):
+                    scan_stmts(stmt.body)
+                elif isinstance(stmt, WithIR):
+                    scan_stmts(stmt.body)
+
+        # Scan functions
+        for func in self.ir.functions:
+            scan_stmts(func.body)
+        # Scan cached methods
+        for _, method_ir in self.ir.method_ir_cache.items():
+            scan_stmts(method_ir.body)
+
+        if need_zero:
+            self._zero_const_id = self._ensure_int_const(0)
+        if need_one:
+            self._one_const_id = self._ensure_int_const(1)
     
     def _gen_headers(self, output_code):
         """Generate necessary C headers"""
@@ -477,13 +530,13 @@ class LLVMBackend:
                 args = stmt.iter_expr.args
                 # Determine start, end, step
                 if len(args) == 1:
-                    start_expr = ConstantIR(self.ir.register_int_constant(0), 'int')
+                    start_expr = ConstantIR(self._zero_const_id, 'int')
                     end_expr = args[0]
-                    step_expr = ConstantIR(self.ir.register_int_constant(1), 'int')
+                    step_expr = ConstantIR(self._one_const_id, 'int')
                 elif len(args) == 2:
                     start_expr = args[0]
                     end_expr = args[1]
-                    step_expr = ConstantIR(self.ir.register_int_constant(1), 'int')
+                    step_expr = ConstantIR(self._one_const_id, 'int')
                 elif len(args) >= 3:
                     start_expr = args[0]
                     end_expr = args[1]
