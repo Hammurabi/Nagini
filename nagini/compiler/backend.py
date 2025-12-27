@@ -94,8 +94,13 @@ class LLVMBackend:
     def _ensure_int_const(self, value: int) -> int:
         """Ensure an int constant is registered and return its id."""
         key = ('int', value)
-        ident = self.ir.consts_dict[key] if key in self.ir.consts_dict else self.ir.register_int_constant(value)
-        return int(ident)
+        if key in self.ir.consts_dict:
+            ident_raw = self.ir.consts_dict[key]
+        else:
+            ident_raw = self.ir.register_int_constant(value)
+        ident_int = int(ident_raw)
+        self.ir.consts_dict[key] = ident_int
+        return ident_int
 
     def _pre_register_loop_constants(self):
         """Pre-register int constants needed by for-range lowering (0 and 1)."""
