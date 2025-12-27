@@ -268,13 +268,6 @@ class LLVMBackend:
         self.output_code.append('}')
         self.output_code.append('')
 
-        # Basic subscript helper (placeholder for future full implementation)
-        self.output_code.append('void NgSetItem(Runtime* runtime, void* obj, void* index, void* value) {')
-        self.output_code.append('    (void)runtime; (void)obj; (void)index; (void)value;')
-        self.output_code.append('    /* TODO: Implement subscript assignment */')
-        self.output_code.append('}')
-        self.output_code.append('')
-
         # Basic slice helper (placeholder for future full implementation)
         self.output_code.append('Object* NgSlice(Runtime* runtime, void* obj, void* start, void* stop, void* step) {')
         self.output_code.append('    (void)runtime; (void)obj; (void)start; (void)stop; (void)step;')
@@ -1161,7 +1154,7 @@ class LLVMBackend:
                 step_code = self._gen_expr(expr.index.step) if expr.index.step else 'NULL'
                 return f'NgSlice(runtime, {obj_code}, {start_code}, {stop_code}, {step_code})'
             index_code = self._gen_expr(expr.index)
-            return f'{obj_code}[{index_code}]'
+            return f'NgGetItem(runtime, {obj_code}, {index_code})'
         
         elif isinstance(expr, ConstructorCallIR): # TODO:
             # Constructor call (ClassName(...))
