@@ -60,6 +60,7 @@ Object* alloc_list(Runtime* runtime);
 Object* alloc_instance(Runtime* runtime);
 Object* alloc_object(Runtime* runtime, int32_t typename);
 Dict* alloc_dict(Runtime* runtime);
+Object* alloc_bool(Runtime* runtime, bool value);
 int dict_set(Runtime* runtime, void* dd, void* kk, void* vv);
 Object* dict_get(Runtime* runtime, void* d, void* key);
 bool dict_del(Runtime* runtime, void* d, void* key);
@@ -755,6 +756,65 @@ inline Object* NgMod(Runtime* runtime, void* aa, void* bb) {
         obj_type_name(b)
     );
     exit(1);
+}
+
+double _NgAsDouble(Object* obj) {
+    if (obj->__flags__.type == OBJ_TYPE_INT) {
+        return (double)((IntObject*)obj)->__value__;
+    }
+    if (obj->__flags__.type == OBJ_TYPE_FLOAT) {
+        return ((FloatObject*)obj)->__value__;
+    }
+    fprintf(stderr, "TypeError: unsupported operand type for comparison: '%s'\n", obj_type_name(obj));
+    exit(1);
+}
+
+Object* NgEq(Runtime* runtime, void* aa, void* bb) {
+    Object* a = (Object*)aa;
+    Object* b = (Object*)bb;
+    double va = _NgAsDouble(a);
+    double vb = _NgAsDouble(b);
+    return alloc_bool(runtime, va == vb);
+}
+
+Object* NgNeq(Runtime* runtime, void* aa, void* bb) {
+    Object* a = (Object*)aa;
+    Object* b = (Object*)bb;
+    double va = _NgAsDouble(a);
+    double vb = _NgAsDouble(b);
+    return alloc_bool(runtime, va != vb);
+}
+
+Object* NgLt(Runtime* runtime, void* aa, void* bb) {
+    Object* a = (Object*)aa;
+    Object* b = (Object*)bb;
+    double va = _NgAsDouble(a);
+    double vb = _NgAsDouble(b);
+    return alloc_bool(runtime, va < vb);
+}
+
+Object* NgLeq(Runtime* runtime, void* aa, void* bb) {
+    Object* a = (Object*)aa;
+    Object* b = (Object*)bb;
+    double va = _NgAsDouble(a);
+    double vb = _NgAsDouble(b);
+    return alloc_bool(runtime, va <= vb);
+}
+
+Object* NgGt(Runtime* runtime, void* aa, void* bb) {
+    Object* a = (Object*)aa;
+    Object* b = (Object*)bb;
+    double va = _NgAsDouble(a);
+    double vb = _NgAsDouble(b);
+    return alloc_bool(runtime, va > vb);
+}
+
+Object* NgGeq(Runtime* runtime, void* aa, void* bb) {
+    Object* a = (Object*)aa;
+    Object* b = (Object*)bb;
+    double va = _NgAsDouble(a);
+    double vb = _NgAsDouble(b);
+    return alloc_bool(runtime, va >= vb);
 }
 
 
@@ -1868,6 +1928,7 @@ Object* alloc_bool(Runtime* runtime, bool value) {
     obj->base.__typename__ = get_symbol_id(runtime, "bool");
     obj->base.__refcount__ = 1;
     obj->base.__flags__.boolean = value ? 1 : 0;
+    ((IntObject*)obj)->__value__ = value ? 1 : 0;
     obj->base.__allocation__.is_manual = 0;
     obj->base.__flags__.type = OBJ_TYPE_INT;
 

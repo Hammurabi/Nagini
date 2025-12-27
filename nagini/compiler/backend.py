@@ -171,10 +171,10 @@ class LLVMBackend:
         self.output_code.append('/* Check argument count for function calls */')
         self.output_code.append('void check_arg_count(Runtime* runtime, const char* func_name, int64_t expected, int64_t actual, uint8_t has_varargs) {')
         self.output_code.append('    if (!has_varargs && actual != expected) {')
-        self.output_code.append('        fprintf(stderr, "Runtime Error: Function \'%s\' expects %lld arguments but got %lld\\n", func_name, expected, actual);')
+        self.output_code.append('        fprintf(stderr, "Runtime Error: Function \'%s\' expects %ld arguments but got %ld\\n", func_name, expected, actual);')
         self.output_code.append('        exit(1);')
         self.output_code.append('    } else if (has_varargs && actual < expected) {')
-        self.output_code.append('        fprintf(stderr, "Runtime Error: Function \'%s\' expects at least %lld arguments but got %lld\\n", func_name, expected, actual);')
+        self.output_code.append('        fprintf(stderr, "Runtime Error: Function \'%s\' expects at least %ld arguments but got %ld\\n", func_name, expected, actual);')
         self.output_code.append('        exit(1);')
         self.output_code.append('    }')
         self.output_code.append('}')
@@ -495,19 +495,18 @@ class LLVMBackend:
                 end_code = f'NgCastToInt(runtime, {self._gen_expr(end_expr)})'
                 step_code = f'NgCastToInt(runtime, {self._gen_expr(step_expr)})'
 
+                if stmt.target not in self.declared_vars:
+                    result.append(f'{ind}Object* {stmt.target} = NULL;')
+                    self.declared_vars.add(stmt.target)
+
                 result.append(f'{ind}{{')
                 result.append(f'{ind}    int64_t __start = {start_code};')
                 result.append(f'{ind}    int64_t __end = {end_code};')
                 result.append(f'{ind}    int64_t __step = {step_code};')
                 result.append(f'{ind}    if (__step == 0) {{ fprintf(stderr, "Runtime Error: range() step argument must not be zero\\n"); exit(1); }}')
                 result.append(f'{ind}    for (int64_t __i = __start; (__step > 0) ? (__i < __end) : (__i > __end); __i += __step) {{')
-
-                if stmt.target in self.declared_vars:
-                    result.append(f'{ind}        if ({stmt.target}) DECREF(runtime, {stmt.target});')
-                    result.append(f'{ind}        {stmt.target} = alloc_int(runtime, __i);')
-                else:
-                    result.append(f'{ind}        Object* {stmt.target} = alloc_int(runtime, __i);')
-                    self.declared_vars.add(stmt.target)
+                result.append(f'{ind}        if ({stmt.target}) DECREF(runtime, {stmt.target});')
+                result.append(f'{ind}        {stmt.target} = alloc_int(runtime, __i);')
 
                 for body_stmt in stmt.body:
                     result.extend(self._gen_stmt(body_stmt, indent + 2))
