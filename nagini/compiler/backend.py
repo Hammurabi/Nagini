@@ -113,7 +113,7 @@ class LLVMBackend:
                     if argc == 1:
                         need_zero = True
                         need_one = True
-                    elif argc == 2:
+                    elif argc >= 2:
                         need_one = True
                 # Recurse into nested bodies
                 if isinstance(stmt, IfIR):
@@ -529,6 +529,10 @@ class LLVMBackend:
         elif isinstance(stmt, ForIR):
             # For loop (simplified - assume range-like iteration)
             if isinstance(stmt.iter_expr, CallIR) and stmt.iter_expr.func_name == 'range':
+                if self._zero_const_id is None:
+                    self._zero_const_id = self._ensure_int_const(0)
+                if self._one_const_id is None:
+                    self._one_const_id = self._ensure_int_const(1)
                 args = stmt.iter_expr.args
                 # Determine start, end, step
                 if len(args) == 1:
