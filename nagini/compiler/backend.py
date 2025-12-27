@@ -18,6 +18,24 @@ from .ir import (
     SetAttrIR, JoinedStrIR, FormattedValueIR, AugAssignIR
 )
 
+def parse_func_call_args_kwargs(self, expr):
+    num_args = len(expr.args)
+    args = []
+    kwargs = []
+    for arg in expr.args:
+        if isinstance(arg, AssignIR):
+            # Keyword argument
+            kw_name = arg.target
+            kw_value_code = f'{arg.value}'
+            # kwargs.append(f'{{runtime->constants[{kw_name}], {kw_value_code}}}')
+            raise NotImplementedError("Keyword arguments in function calls not yet implemented.")
+        else:
+            arg_code = self._gen_expr(arg)
+            args.append(arg_code)
+    args_code = ', '.join(args)
+    atuple = f'alloc_tuple(runtime, {num_args}, (Object*[]) {{{args_code}}})' if num_args > 0 else 'NULL'
+    return atuple, 'NULL'  # kwargs not implemented yet
+
 def gen_uuid(length=8):
     characters = string.ascii_letters + string.digits  # a-z, A-Z, 0-9
     return ''.join(secrets.choice(characters) for _ in range(length))
@@ -409,19 +427,33 @@ class LLVMBackend:
             self.declared_vars.add(param_name)
         
         # Generate function signature
-        return_type = self._map_type_to_c(func.return_type)
+        # return_type = self._map_type_to_c(func.return_type)
         
         # Special case for main - always return int
         if func.name == 'main':
             return_type = 'int'
+            declared_vars = set()
+        else:
+            return_type = 'Object*'
         
         # Build parameter list
-        params_str = ', '.join([
-            f'{self._map_type_to_c(t) if t else "int64_t"} {n}' 
-            for n, t in func.params
-        ]) if func.params else 'void'
-        
+        params_str = 'Runtime* runtime, Tuple* args, Dict* kwargs' if not func.name == 'main' else 'void'
         self.output_code.append(f'{return_type} {func.name}({params_str}) {{')
+        if not func.name == 'main':
+            self.output_code.append(f'    if (args->size < {len(func.params)}) {{')
+            self.output_code.append(f'        fprintf(stderr, "Runtime Error: Function \'{func.name}\' expects at least {len(func.params)} arguments but got %zu\\n", args->size);')
+            self.output_code.append(f'        exit(1);')
+            self.output_code.append(f'    }}')
+        for param_name, _ in func.params:
+            self.output_code.append(f'    /* Extract parameter: {param_name} */')
+            self.output_code.append(f'    Object* {param_name} = args->items[{len(self.declared_vars) - len(func.params) + func.params.index((param_name, _))}];')
+            if _:
+                self.output_code.append(f'    char pName_{param_name}[64];')
+                self.output_code.append(f'    NgGetTypeName(runtime, {param_name}, pName_{param_name}, sizeof(pName_{param_name}));')
+                self.output_code.append(f'    if (strcmp("{_}", pName_{param_name}) != 0) {{')
+                self.output_code.append(f'        fprintf(stderr, "Runtime Error: Received wrong type for parameter \'{param_name}\' in function \'{func.name}\'.\\n Expected type: {_}, got: %s\\n", pName_{param_name});')
+                self.output_code.append(f'        exit(1);')
+                self.output_code.append(f'    }}')
         
         # Add runtime type checks for strict parameters at function entry
         # Only check for object types (classes), not primitives like int, float, bool, str
@@ -456,10 +488,16 @@ class LLVMBackend:
         for stmt in func.body:
             stmt_code = self._gen_stmt(stmt, indent=1)
             self.output_code.extend(stmt_code)
+
+        # if no return statement, add default return
+        has_return = any(isinstance(stmt, ReturnIR) for stmt in func.body)
         
         # Add default return for main or void functions
         if func.name == 'main':
             self.output_code.append('    return 0;')
+        elif not has_return:
+            if return_type == 'Object*':
+                self.output_code.append('    return NULL;')
         
         self.output_code.append('}')
         self.output_code.append('')
@@ -1022,6 +1060,7 @@ class LLVMBackend:
             else:
                 # Regular function call
                 args_code = ', '.join([self._gen_expr(arg) for arg in expr.args])
+                tup, kwa = parse_func_call_args_kwargs(self, expr)
                 
                 # Map special functions
                 if expr.func_name == 'print':
@@ -1052,7 +1091,7 @@ class LLVMBackend:
                     else:
                         return 'printf("\\n")'
                 
-                return f'{expr.func_name}({args_code})'
+                return f'{expr.func_name}(runtime, (Tuple*){tup}, (Dict*){kwa})'
         
         elif isinstance(expr, AttributeIR):
             # Member access

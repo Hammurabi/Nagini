@@ -15,7 +15,18 @@ class Vec3:
         # return "vec"
         return f"Vec3({self.x:.2f}, {self.y:.2f}, {self.z:.2f})"
 
+def fibonacci(n: int):
+    a = 0
+    b = 1
+    for _ in range(n):
+        print(f'ib step: a={a}, b={b}')
+        temp = a      # save old a
+        a = b         # update a to previous b
+        b = temp + b  # update b to old a + old b
+    return a
+
 if __name__ == "__main__":
+    print(fibonacci(10))
     v = Vec3(1.0, 2.0, 3.0)
     print(v.magnitude())
     print(v)
@@ -23,6 +34,10 @@ if __name__ == "__main__":
     for i in range(5):
         total += 5
         print(total)
+    i = 0
+    while i < 3:
+        print(i)
+        i = i + 1
     # with nexc('cpu') as optim: # or gpu
     #     array = optim.array(300, type=optim.fp32)
     #     for i in range(100):
