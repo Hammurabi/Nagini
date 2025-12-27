@@ -2355,9 +2355,10 @@ Object* NgFormattedValue(Runtime* runtime, void* vv, void* ss)
     if (sspec->__flags__.type != OBJ_TYPE_STRING) {
         fprintf(stderr,
             "TypeError: format spec must be a string, not '%s'\n",
-            obj_type_name(sspec));
+            obj_type_name(sspec)
+        );
+        exit(1);
     }
-    exit(1);
 
     return NgApplyFormat(runtime, value, sspec);
 }
