@@ -19,9 +19,11 @@ if __name__ == "__main__":
     v = Vec3(1.0, 2.0, 3.0)
     print(v.magnitude())
     print(v)
+    total = 0
     for i in range(5):
-        print(f"i: {i}")
-    with nexc('cpu') as optim: # or gpu
-        array = optim.array(300, type=optim.fp32)
-        for i in range(100):
-            array[i] = 1.0 * 5353 + i * 23.0 * optim.cast(optim.fp32, v.x)
+        total = total + i
+    print(total)
+    # with nexc('cpu') as optim: # or gpu
+    #     array = optim.array(300, type=optim.fp32)
+    #     for i in range(100):
+    #         array[i] = 1.0 * 5353 + i * 23.0 * optim.cast(optim.fp32, v.x)
