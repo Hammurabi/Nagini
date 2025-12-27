@@ -729,7 +729,6 @@ class NaginiIR:
         value_len = len(value_elts) if value_elts is not None else None
         star_index = next((i for i, e in enumerate(target_tuple.elts) if isinstance(e, ast.Starred)), None)
         total_targets = len(target_tuple.elts)
-
         staged_targets = []
 
         for idx, elt in enumerate(target_tuple.elts):
@@ -741,7 +740,6 @@ class NaginiIR:
                     source_index = idx
 
             source_node = value_elts[source_index] if value_elts and source_index < len(value_elts) else None
-
             if isinstance(elt, ast.Starred) and isinstance(elt.value, ast.Name):
                 # Starred target gets the remaining slice from current position
                 start_const = ConstantIR(self.register_int_constant(idx), 'int')
