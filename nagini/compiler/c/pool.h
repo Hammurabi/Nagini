@@ -215,8 +215,14 @@ void* dynamic_pool_alloc(dynamic_pool_t* pool) {
         _push_page(&pool->full_pages, page);
     }
 
-    // 3. Return pointer to the payload (hiding the header)
-    return (void*)(raw_block + sizeof(block_header_t));
+    // 3. Zero the payload to prevent use of stale data from previous allocations
+    // The actual payload size is block_total_size - header size
+    void* payload = (void*)(raw_block + sizeof(block_header_t));
+    size_t payload_size = pool->block_total_size - sizeof(block_header_t);
+    memset(payload, 0, payload_size);
+    
+    // 4. Return pointer to the payload (hiding the header)
+    return payload;
 }
 
 void dynamic_pool_free(dynamic_pool_t* pool, void* ptr) {
@@ -242,11 +248,17 @@ void dynamic_pool_free(dynamic_pool_t* pool, void* ptr) {
 
     page->used_count--;
 
-    // 4. SHRINK: If page is completely empty, return memory to OS
-    if (page->used_count == 0) {
-        _unlink_page(&pool->partial_pages, page);
-        free(page);
-    }
+    // NOTE: We intentionally do NOT free empty pages back to the OS.
+    // Keeping pages allocated has several benefits:
+    // 1. Avoids potential use-after-free bugs if there are lingering references
+    // 2. Improves performance by keeping memory warm for reuse
+    // 3. Reduces malloc/free overhead
+    // The pages will be properly freed when the entire pool is destroyed.
+    
+    // if (page->used_count == 0) {
+    //     _unlink_page(&pool->partial_pages, page);
+    //     free(page);
+    // }
 }
 
 void dynamic_pool_destroy(dynamic_pool_t* pool) {

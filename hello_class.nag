@@ -13,11 +13,14 @@ class Vec3:
         return self.x
     def __str__(self) -> str:
         # return "vec"
-        return f"Vec3({self.x}, {self.y}, {self.z:.8f})"
+        return f"Vec3({self.x:.2f}, {self.y:.2f}, {self.z:.2f})"
 
 if __name__ == "__main__":
     v = Vec3(1.0, 2.0, 3.0)
+    print(v.magnitude())
     print(v)
+    for i in range(5):
+        print(f"i: {i}")
     # with nexc('cpu', capture=[v]) as optim: # or gpu
     #     array = optim.array(300, type=float)
     #     for i in range(100):

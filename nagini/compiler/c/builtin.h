@@ -81,6 +81,7 @@ void NgDelMember(Runtime* runtime, InstanceObject* instance, StringObject* membe
 Object* NgToString(Runtime* runtime, void* obj);
 const char* NgToCString(Runtime* runtime, void* obj);
 Object* NgCall(Runtime* runtime, void* func, void* args, void* kwargs);
+void NgGetTypeName(Runtime* runtime, void* oo, char* buffer, size_t size);
 
 #if defined(__linux__) || defined(__unix__)
 void siphash_random_key(uint8_t key[16]) {
@@ -790,6 +791,7 @@ typedef struct PoolCollection {
 
 typedef struct BuiltinNames {
     StringObject* none;
+    StringObject* __typename__;
 
     /* -------------------------------------------------------------------------
      * 1. Object Lifecycle & Memory Management
@@ -1022,6 +1024,7 @@ Runtime* init_runtime() {
     siphash_random_key(runtime->siphash_key);
 
     runtime->builtin_names.none  = (StringObject*) alloc_str(runtime, "None");
+    runtime->builtin_names.__typename__ = (StringObject*) alloc_str(runtime, "__typename__");
 
     // -------------------------------------------------------------------------
     // 1. Object Lifecycle & Memory Management
@@ -1250,13 +1253,11 @@ Object* NgToString(Runtime* runtime, void* obj) {
                 StringObject* str_method = (StringObject*)runtime->builtin_names.__str__;
                 Object* str_func = dict_get(runtime, dict, (Object*)str_method);
                 if (str_func) {
-                    Function* func = (Function*)str_func;
-                    // Call __str__ method directly with self parameter
-                    // ASSUMPTION: All __str__ methods have signature: Object* method(Runtime*, Object* self)
-                    // This is guaranteed by the code generator for all instance methods with one parameter.
-                    // DO NOT use this pattern for methods with different signatures or variadic methods.
-                    Object* (*method_ptr)(Runtime*, Object*) = (Object* (*)(Runtime*, Object*))func->native_ptr;
-                    Object* result = method_ptr(runtime, o);
+                    // Call __str__ method using new calling convention
+                    // All methods now use (Runtime*, Tuple*, Dict*) signature
+                    Object* args_array[1] = {o};
+                    Tuple* args = (Tuple*)alloc_tuple(runtime, 1, args_array);
+                    Object* result = NgCall(runtime, str_func, args, NULL);
                     return result;
                 }
                 //  else {
@@ -1440,13 +1441,59 @@ void del(Runtime* runtime, void* ptr, bool is_manual, int pool_id) {
     }
 }
 
+void NgGetTypeName(Runtime* runtime, void* oo, char* buffer, size_t size) {
+    Object* obj = (Object*)oo;
+    switch (obj->__flags__.type) {
+        case OBJ_TYPE_INSTANCE: {
+                InstanceObject* instance = (InstanceObject*)obj;
+                Object* class_obj = NgGetMember(runtime, instance, (Object*)runtime->builtin_names.__class__);
+                if (!class_obj) {
+                    snprintf(buffer, size, "instance");
+                    return;
+                }
+
+                if (class_obj->__flags__.type != OBJ_TYPE_INSTANCE) {
+                    snprintf(buffer, size, "instance");
+                    return;
+                }
+
+                Object* type_name_obj = NgGetMember(runtime, class_obj, (Object*)runtime->builtin_names.__typename__);
+                if (type_name_obj && type_name_obj->__flags__.type == OBJ_TYPE_STRING) {
+                    StringObject* str_obj = (StringObject*) type_name_obj;
+                    snprintf(buffer, size, "%.*s", (int)str_obj->size, ((UnicodeObject*)str_obj)->data);
+                } else {
+                    snprintf(buffer, size, "instance");
+                }
+            }
+            break;
+        default: {
+            const char* type_name = obj_type_names[obj->__flags__.type];
+            snprintf(buffer, size, "%s", type_name);
+            }
+            break;
+    }
+}
+
 /* Call a function object */
 inline Object* NgCall(Runtime* runtime, void* ffunc, void* aargs, void* kkwargs) {
+    if (!ffunc) {
+        fprintf(stderr, "Runtime Error: Attempting to call NULL function\n");
+        exit(1);
+    }
     Function* func = (Function*)ffunc;
     Tuple* args = (Tuple*)aargs;
     Dict* kwargs = (Dict*)kkwargs;
+    if (!func->native_ptr) {
+        fprintf(stderr, "Runtime Error: Function has NULL native_ptr\n");
+        exit(1);
+    }
+    
+    // All functions now use tuple/dict signature
     Object* (*native_func)(Runtime*, Tuple*, Dict*) = (Object* (*)(Runtime*, Tuple*, Dict*))func->native_ptr;
-    return native_func(runtime, args, kwargs);
+    Object* result = native_func(runtime, args, kwargs);
+    if (args) DECREF(runtime, (Object*)args);
+    if (kwargs) DECREF(runtime, (Object*)kwargs);
+    return result;
 }
 
 /* Hash function */
@@ -1638,6 +1685,7 @@ Object* NgPow(Runtime* runtime, void* bb, void* ee) {
 
 int dict_set(Runtime* runtime, void* dd, void* kk, void* vv) {
     Dict* d = (Dict*)dd;
+    if (!d) return -1;  // Add NULL check
     Object* key = (Object*)kk;
     Object* value = (Object*)vv;
 
@@ -1684,6 +1732,7 @@ int dict_set(Runtime* runtime, void* dd, void* kk, void* vv) {
 
 Object* dict_get(Runtime* runtime, void* dd, void* kk) {
     Dict* d = (Dict*)dd;
+    if (!d) return NULL;  // Add NULL check
     Object* key = (Object*)kk;
 
     int64_t h = hash(runtime, key);
@@ -1708,6 +1757,7 @@ Object* dict_get(Runtime* runtime, void* dd, void* kk) {
 
 bool dict_del(Runtime* runtime, void* dd, void* kk) {
     Dict* d = (Dict*)dd;
+    if (!d) return false;  // Add NULL check
     Object* key = (Object*)kk;
 
     int64_t h = hash(runtime, key);
@@ -1727,6 +1777,12 @@ bool dict_del(Runtime* runtime, void* dd, void* kk) {
 
                 if (next->psl <= 1) {
                     d->entries[idx].psl = 0;
+                    if (d->entries[idx].key) {
+                        DECREF(runtime, d->entries[idx].key);
+                    }
+                    if (d->entries[idx].value) {
+                        DECREF(runtime, d->entries[idx].value);
+                    }
                     d->entries[idx].key = NULL;
                     d->entries[idx].value = NULL;
                     break;
@@ -1755,8 +1811,13 @@ void dict_destroy(Runtime* runtime, void* dd) {
         }
     }
     
-    free(d->entries);
-    free(d);
+    // Free the entries array (allocated with alloc())
+    bool is_manual = d->__allocation__.is_manual == 1;
+    int pool_id = d->__allocation__.pool_id;
+    del(runtime, d->entries, is_manual, pool_id);
+    
+    // Free the dict itself from the pool
+    dynamic_pool_free(runtime->pool->dict, d);
 }
 
 // Object* NgAllocNew(Runtime* runtime, Object* cls) {
@@ -1952,6 +2013,7 @@ Object* alloc_tuple(Runtime* runtime, size_t size, Object** objects) {
 
     for (size_t i = 0; i < size; i++) {
         tuple->items[i] = objects[i];
+        INCREF(runtime, objects[i]);
     }
 
     return (Object*) tuple;
@@ -1976,6 +2038,7 @@ const char* obj_type_name(void* oo) {
     }
     return "unknown";
 }
+
 
 void* INCREF(Runtime* runtime, void* obj) {
     if (obj != NULL) {
@@ -2134,6 +2197,77 @@ Object* NgCatStr(Runtime* runtime, Object* a, Object* b)
     buffer[a_len + b_len] = '\0';
 
     Object* result = alloc_str(runtime, buffer);
+    return result;
+}
+
+Object* NgCatTuple(Runtime* runtime, void* aa, void* bb)
+{
+    Object* a = (Object*)aa;
+    Object* b = (Object*)bb;
+    
+    if (!a || !b) {
+        fprintf(stderr, "TypeError: NgCatTuple received NULL argument\n");
+        exit(1);
+    }
+
+    if (a->__flags__.type != OBJ_TYPE_TUPLE ||
+        b->__flags__.type != OBJ_TYPE_TUPLE) {
+        fprintf(stderr, "TypeError: NgCatTuple expects two tuple objects\n");
+        exit(1);
+    }
+
+    Tuple* atuple = (Tuple*)a;
+    Tuple* btuple = (Tuple*)b;
+
+    size_t new_size = atuple->size + btuple->size;
+    Object* items[6144]; // max tuple size
+    if (new_size > sizeof(items) / sizeof(items[0])) {
+        fprintf(stderr, "Error: concatenated tuple too large\n");
+        exit(1);
+    }
+
+    for (size_t i = 0; i < atuple->size; i++) {
+        items[i] = atuple->items[i];
+    }
+
+    for (size_t i = 0; i < btuple->size; i++) {
+        items[atuple->size + i] = btuple->items[i];
+    }
+
+    Object* result = alloc_tuple(runtime, new_size, items);
+    return result;
+}
+
+Object* NgPrependTuple(Runtime* runtime, void* ii, void* tt)
+{
+    Object* item = (Object*)ii;
+    Object* tuple = (Object*)tt;
+
+    if (!tuple) {
+        fprintf(stderr, "TypeError: NgPrependTuple received NULL tuple argument\n");
+        exit(1);
+    }
+
+    if (tuple->__flags__.type != OBJ_TYPE_TUPLE) {
+        fprintf(stderr, "TypeError: NgPrependTuple expects a tuple object\n");
+        exit(1);
+    }
+
+    Tuple* ttuple = (Tuple*)tuple;
+
+    size_t new_size = ttuple->size + 1;
+    Object* items[6144]; // max tuple size
+    if (new_size > sizeof(items) / sizeof(items[0])) {
+        fprintf(stderr, "Error: prepended tuple too large\n");
+        exit(1);
+    }
+
+    items[0] = item;
+    for (size_t i = 0; i < ttuple->size; i++) {
+        items[i + 1] = ttuple->items[i];
+    }
+
+    Object* result = alloc_tuple(runtime, new_size, items);
     return result;
 }
 
