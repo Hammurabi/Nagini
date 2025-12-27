@@ -247,7 +247,7 @@ class NaginiIR:
         # Cache for converted methods to avoid double conversion
         self.method_ir_cache = {}
 
-    def register_string_constant(self, value: str) -> str:
+    def register_string_constant(self, value: str) -> int:
         """Register a string constant and return its unique name"""
         # Use tuple key (type, value) to ensure strings don't collide with other types
         key = ('str', value)
@@ -272,7 +272,7 @@ class NaginiIR:
         self.consts_dict[key] = ident
         return ident
     
-    def register_float_constant(self, value: float) -> str:
+    def register_float_constant(self, value: float) -> int:
         """Register a float constant and return its unique name"""
         # Use tuple key (type, value) to avoid collision between int and float
         # e.g., 2 (int) and 2.0 (float) should be different constants
@@ -285,7 +285,7 @@ class NaginiIR:
         self.consts_dict[key] = ident
         return ident
     
-    def register_bytes_constant(self, value: bytes) -> str:
+    def register_bytes_constant(self, value: bytes) -> int:
         """Register a bytes constant and return its unique name"""
         # Use tuple key (type, value) to avoid collision with strings
         # Bytes and str objects can have similar representations
@@ -298,7 +298,7 @@ class NaginiIR:
         self.consts_dict[key] = ident
         return ident
     
-    def register_bool_constant(self, value: int) -> str:
+    def register_bool_constant(self, value: int) -> int:
         """Register a boolean constant and return its unique name"""
         # Use tuple key (type, value) to avoid collision with int
         # e.g., 0 (int) and False (bool) should be different constants

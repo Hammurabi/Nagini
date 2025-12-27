@@ -271,7 +271,7 @@ class LLVMBackend:
         self.output_code.append('Object* NgSlice(Runtime* runtime, void* obj, void* start, void* stop, void* step) {')
         self.output_code.append('    (void)runtime; (void)obj; (void)start; (void)stop; (void)step;')
         self.output_code.append('    /* TODO: Implement slicing semantics */')
-        self.output_code.append('    return NULL;')
+        self.output_code.append('    return (Object*)obj;')
         self.output_code.append('}')
         self.output_code.append('')
     
