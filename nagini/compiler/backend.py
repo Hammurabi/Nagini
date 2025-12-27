@@ -554,8 +554,15 @@ class LLVMBackend:
                         # Get type from kwargs
                         array_type = 'double'  # default
                         if call.kwargs and 'type' in call.kwargs:
-                            # Extract type - for now assume float/int
-                            array_type = 'double'  # TODO: map Python types to C types
+                            type_expr = call.kwargs['type']
+                            # Check if type is an attribute (e.g., optim.fp32)
+                            if isinstance(type_expr, AttributeIR):
+                                # Get the type name from the attribute
+                                type_name = self._get_type_name_from_attr(type_expr)
+                                array_type = self._map_nexc_type_to_c(type_name)
+                            elif isinstance(type_expr, VariableIR):
+                                # Fallback to default for now
+                                array_type = 'double'
                         
                         # Generate native C array
                         init_value = ''
@@ -564,7 +571,8 @@ class LLVMBackend:
                         elif method_name == 'ones':
                             result.append(f'{ind}{array_type} {stmt.target}[{size_code}];')
                             result.append(f'{ind}for(int __i_{stmt.target} = 0; __i_{stmt.target} < {size_code}; __i_{stmt.target}++) {{')
-                            result.append(f'{ind}    {stmt.target}[__i_{stmt.target}] = 1.0;')
+                            init_val = '1.0' if 'double' in array_type or 'float' in array_type else '1'
+                            result.append(f'{ind}    {stmt.target}[__i_{stmt.target}] = {init_val};')
                             result.append(f'{ind}}}')
                             nexc_arrays[stmt.target] = {'type': array_type, 'size': size_code}
                             return result
@@ -681,17 +689,79 @@ class LLVMBackend:
             index = self._gen_nexc_expr(expr.index, nexc_arrays)
             return f'{obj}[{index}]'
         
+        elif isinstance(expr, AttributeIR):
+            # Attribute access (e.g., v.x)
+            obj = self._gen_nexc_expr(expr.obj, nexc_arrays)
+            # Get the attribute name from constants
+            if expr.attr in self.ir.consts:
+                const_value, _ = self.ir.consts[expr.attr]
+                attr_name = const_value.strip('"') if isinstance(const_value, str) else str(const_value)
+                return f'{obj}.{attr_name}'
+            return f'{obj}.attr_{expr.attr}'
+        
         elif isinstance(expr, CallIR):
             # Function call
             if expr.func_name == 'range':
                 # range() is handled in for loops
                 if expr.args:
                     return self._gen_nexc_expr(expr.args[0], nexc_arrays)
+            elif expr.func_name == 'cast' and isinstance(expr.obj, VariableIR):
+                # Handle optim.cast(type, value)
+                if len(expr.args) >= 2:
+                    target_type_expr = expr.args[0]
+                    value_expr = expr.args[1]
+                    
+                    # Get the target C type
+                    if isinstance(target_type_expr, AttributeIR):
+                        type_name = self._get_type_name_from_attr(target_type_expr)
+                        c_type = self._map_nexc_type_to_c(type_name)
+                    else:
+                        c_type = 'double'  # default
+                    
+                    # Generate the cast
+                    value_code = self._gen_nexc_expr(value_expr, nexc_arrays)
+                    return f'(({c_type}){value_code})'
             # Fallback
             return self._gen_expr(expr)
         
         # Fallback to regular expression generation
         return self._gen_expr(expr)
+    
+    def _get_type_name_from_attr(self, attr_expr: AttributeIR) -> str:
+        """Extract type name from attribute expression (e.g., optim.fp32 -> 'fp32')"""
+        # The attr field in AttributeIR contains the constant ID for the attribute name
+        # We need to look it up in the IR's constant table
+        if attr_expr.attr in self.ir.consts:
+            const_value, _ = self.ir.consts[attr_expr.attr]
+            # Remove quotes from string constant
+            if isinstance(const_value, str):
+                return const_value.strip('"')
+        return 'float'  # default fallback
+    
+    def _map_nexc_type_to_c(self, type_name: str) -> str:
+        """Map nexc type names to C type names"""
+        type_map = {
+            'int': 'int64_t',
+            'int64': 'int64_t',
+            'int32': 'int32_t',
+            'int16': 'int16_t',
+            'int8': 'int8_t',
+            'int2': 'int8_t',
+            'uint': 'uint64_t',
+            'uint64': 'uint64_t',
+            'uint32': 'uint32_t',
+            'uint16': 'uint16_t',
+            'uint8': 'uint8_t',
+            'uint2': 'uint8_t',
+            'float': 'double',
+            'fp64': 'double',
+            'fp32': 'float',
+            'fp16': 'uint16_t',  # Half precision (needs conversion)
+            'fp8': 'uint8_t',    # 8-bit float (needs conversion)
+            'fp4': 'uint8_t',    # 4-bit float (needs conversion)
+            'bool': 'uint8_t',   # Boolean as 1 byte
+        }
+        return type_map.get(type_name, 'double')
     
     def _gen_expr(self, expr: ExprIR) -> str:
         """Generate C code for an expression IR node"""

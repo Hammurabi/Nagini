@@ -10,11 +10,29 @@ The Native Execution Context (nexc) is a high-performance feature in Nagini that
 
 ```python
 with nexc('cpu') as optim:
-    # Native code block
-    array = optim.array(300, type=float)
+    # Native code block with type attributes
+    array = optim.array(300, type=optim.fp32)
     for i in range(100):
-        array[i] = 1.0 * 5353 + i * 23.0
+        array[i] = 1.0 * 5353 + i * 23.0 * optim.cast(optim.fp32, value)
 ```
+
+### Type Attributes
+
+The nexc context provides type attributes for specifying native types:
+
+```python
+with nexc('cpu') as optim:
+    # Use type attributes instead of Python types
+    float_array = optim.array(100, type=optim.fp32)
+    int_array = optim.array(100, type=optim.int32)
+    double_array = optim.array(100, type=optim.fp64)
+```
+
+Available type attributes:
+- `optim.int`, `optim.int64`, `optim.int32`, `optim.int16`, `optim.int8`, `optim.int2`
+- `optim.uint`, `optim.uint64`, `optim.uint32`, `optim.uint16`, `optim.uint8`, `optim.uint2`
+- `optim.float`, `optim.fp64`, `optim.fp32`, `optim.fp16`, `optim.fp8`, `optim.fp4`
+- `optim.bool`
 
 ### Available Methods
 
@@ -23,7 +41,7 @@ Creates a native array with uninitialized memory.
 
 ```python
 with nexc('cpu') as optim:
-    data = optim.array(100, type=float)
+    data = optim.array(100, type=optim.fp32)
     for i in range(100):
         data[i] = i * 2.5
 ```
@@ -33,8 +51,8 @@ Creates a native array initialized to zero.
 
 ```python
 with nexc('cpu') as optim:
-    zeros = optim.zeros(50, type=float)
-    # All elements are 0.0
+    zeros = optim.zeros(50, type=optim.int32)
+    # All elements are 0
 ```
 
 #### `optim.ones(size, type=float)`
@@ -42,8 +60,24 @@ Creates a native array initialized to one.
 
 ```python
 with nexc('cpu') as optim:
-    ones = optim.ones(50, type=float)
+    ones = optim.ones(50, type=optim.fp64)
     # All elements are 1.0
+```
+
+#### `optim.cast(target_type, value)`
+Casts a value to a specific native type.
+
+```python
+with nexc('cpu') as optim:
+    array = optim.array(100, type=optim.fp32)
+    for i in range(100):
+        # Cast to fp32
+        array[i] = optim.cast(optim.fp32, i * 2.5)
+```
+
+The cast function generates native C casts:
+```c
+array[i] = ((float)(i * 2.5));
 ```
 
 #### `optim.struct(**fields)`
@@ -51,7 +85,7 @@ Defines a native struct type (future feature).
 
 ```python
 with nexc('cpu') as optim:
-    Point = optim.struct(x=float, y=float, z=float)
+    Point = optim.struct(x=optim.fp32, y=optim.fp32, z=optim.fp32)
     # Use with optim.list()
 ```
 
@@ -129,23 +163,35 @@ with nexc('gpu') as optim:
 
 ## Examples
 
-### Example 1: Vector Operations
+### Example 1: Vector Operations with Type Attributes
 ```python
 with nexc('cpu') as optim:
-    a = optim.array(1000, type=float)
-    b = optim.array(1000, type=float)
-    c = optim.array(1000, type=float)
+    a = optim.array(1000, type=optim.fp32)
+    b = optim.array(1000, type=optim.fp32)
+    c = optim.array(1000, type=optim.fp32)
     
     for i in range(1000):
-        a[i] = i * 1.5
-        b[i] = i * 2.0
+        a[i] = optim.cast(optim.fp32, i * 1.5)
+        b[i] = optim.cast(optim.fp32, i * 2.0)
         c[i] = a[i] + b[i]
 ```
 
-### Example 2: Matrix Operations
+### Example 2: Mixed Type Operations
 ```python
 with nexc('cpu') as optim:
-    result = optim.zeros(100, type=float)
+    float_array = optim.array(100, type=optim.fp32)
+    int_array = optim.array(100, type=optim.int32)
+    
+    for i in range(100):
+        int_array[i] = i
+        # Cast integer to float
+        float_array[i] = optim.cast(optim.fp32, int_array[i]) * 2.5
+```
+
+### Example 3: Matrix Operations
+```python
+with nexc('cpu') as optim:
+    result = optim.zeros(100, type=optim.fp64)
     
     for i in range(100):
         sum = 0.0
@@ -154,13 +200,13 @@ with nexc('cpu') as optim:
         result[i] = sum
 ```
 
-### Example 3: Complex Calculations
+### Example 4: Complex Calculations with Casting
 ```python
 with nexc('cpu') as optim:
-    output = optim.array(500, type=float)
+    output = optim.array(500, type=optim.fp32)
     
     for i in range(500):
-        x = i * 0.01
+        x = optim.cast(optim.fp32, i * 0.01)
         # Polynomial evaluation
         output[i] = x * x * x - 2.0 * x * x + x + 1.0
 ```
@@ -180,21 +226,26 @@ with nexc('cpu') as optim:
 **Nagini Code:**
 ```python
 with nexc('cpu') as optim:
-    array = optim.array(10, type=float)
+    array = optim.array(10, type=optim.fp32)
     for i in range(10):
-        array[i] = i * 2.0
+        array[i] = optim.cast(optim.fp32, i * 2.0)
 ```
 
 **Generated C Code:**
 ```c
 {
     /* Native Execution Context (nexc) - cpu target */
-    double array[10];
+    float array[10];
     for(int i = 0; i < 10; i++) {
-        array[i] = (i * 2.0);
+        array[i] = ((float)(i * 2.0));
     }
 }
 ```
+
+**Benefits:**
+- Type attribute `optim.fp32` → `float` in C
+- Cast function `optim.cast(optim.fp32, ...)` → `((float)...)` in C
+- Direct native execution with zero Python overhead
 
 ## Limitations (Current Version)
 
