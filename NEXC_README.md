@@ -75,9 +75,30 @@ with nexc('cpu') as optim:
         array[i] = optim.cast(optim.fp32, i * 2.5)
 ```
 
-The cast function generates native C casts:
+**Casting behavior:**
+
+For native values (within nexc):
 ```c
 array[i] = ((float)(i * 2.5));
+```
+
+For external Nagini object members:
+```python
+v = Vector(1.5, 2.5, 3.5)  # Outside nexc
+with nexc('cpu') as optim:
+    array[i] = optim.cast(optim.fp32, v.x)
+```
+
+Generates runtime-safe casting:
+```c
+// Uses NgGetMember + NgCastToFloat for proper type conversion
+array[i] = ((float)NgCastToFloat(runtime, NgGetMember(runtime, v, ...)));
+```
+
+For integer types:
+```c
+// Uses NgCastToInt
+value = ((int32_t)NgCastToInt(runtime, NgGetMember(runtime, obj, ...)));
 ```
 
 #### `optim.struct(**fields)`

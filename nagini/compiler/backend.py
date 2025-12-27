@@ -691,6 +691,17 @@ class LLVMBackend:
         
         elif isinstance(expr, AttributeIR):
             # Attribute access (e.g., v.x)
+            # Check if obj is a native variable (in nexc_arrays) or external Nagini object
+            if isinstance(expr.obj, VariableIR):
+                var_name = expr.obj.name
+                # If the variable is NOT in nexc_arrays, it's from outside the nexc block
+                # and we need to use NgGetMember
+                if var_name not in nexc_arrays:
+                    # External Nagini object - use runtime function
+                    attr_const_id = expr.attr
+                    return f'NgGetMember(runtime, {var_name}, runtime->constants[{attr_const_id}])'
+            
+            # Native variable attribute access (or fallback)
             obj = self._gen_nexc_expr(expr.obj, nexc_arrays)
             # Get the attribute name from constants
             if expr.attr in self.ir.consts:
@@ -711,14 +722,39 @@ class LLVMBackend:
                     target_type_expr = expr.args[0]
                     value_expr = expr.args[1]
                     
-                    # Get the target C type
+                    # Get the target type name
+                    type_name = 'float'
+                    c_type = 'double'
                     if isinstance(target_type_expr, AttributeIR):
                         type_name = self._get_type_name_from_attr(target_type_expr)
                         c_type = self._map_nexc_type_to_c(type_name)
-                    else:
-                        c_type = 'double'  # default
                     
-                    # Generate the cast
+                    # Check if the value being cast is from a Nagini object (NgGetMember result)
+                    # If it's an attribute access on an external object, use NgCastTo* functions
+                    if isinstance(value_expr, AttributeIR) and isinstance(value_expr.obj, VariableIR):
+                        var_name = value_expr.obj.name
+                        if var_name not in nexc_arrays:
+                            # This is accessing a Nagini object from outside nexc
+                            # Use NgGetMember + NgCastTo* functions
+                            member_access = f'NgGetMember(runtime, {var_name}, runtime->constants[{value_expr.attr}])'
+                            
+                            # Determine which cast function to use based on target type
+                            if type_name in ['float', 'fp64', 'fp32', 'fp16', 'fp8', 'fp4']:
+                                # Use NgCastToFloat which returns double
+                                cast_result = f'NgCastToFloat(runtime, {member_access})'
+                                # If target is fp32, cast the double to float
+                                if type_name == 'fp32':
+                                    return f'((float){cast_result})'
+                                return cast_result
+                            else:
+                                # Use NgCastToInt for integer types
+                                cast_result = f'NgCastToInt(runtime, {member_access})'
+                                # Cast to specific int type if needed
+                                if c_type != 'int64_t':
+                                    return f'(({c_type}){cast_result})'
+                                return cast_result
+                    
+                    # For other values, generate normal cast
                     value_code = self._gen_nexc_expr(value_expr, nexc_arrays)
                     return f'(({c_type}){value_code})'
             # Fallback
