@@ -11,7 +11,7 @@ from .parser import ClassInfo, FieldInfo, FunctionInfo
 from .ir import (
     NaginiIR, FunctionIR, StmtIR, ExprIR,
     ConstantIR, VariableIR, BinOpIR, UnaryOpIR, CallIR, AttributeIR,
-    AssignIR, ReturnIR, IfIR, WhileIR, ForIR, ExprStmtIR,
+    AssignIR, SubscriptAssignIR, ReturnIR, IfIR, WhileIR, ForIR, ExprStmtIR, WithIR,
     ConstructorCallIR, LambdaIR, BoxIR, UnboxIR, SubscriptIR,
     SetAttrIR, JoinedStrIR, FormattedValueIR
 )
@@ -413,6 +413,13 @@ class LLVMBackend:
             obj_code = self._gen_expr(stmt.obj)
             value_code = self._gen_expr(stmt.value)
             result.append(f'{ind}NgSetMember(runtime, {obj_code}, runtime->constants[{stmt.attr}], {value_code});')
+        
+        elif isinstance(stmt, SubscriptAssignIR):
+            # Subscript assignment (obj[index] = value)
+            obj_code = self._gen_expr(stmt.obj)
+            index_code = self._gen_expr(stmt.index)
+            value_code = self._gen_expr(stmt.value)
+            result.append(f'{ind}NgSetItem(runtime, {obj_code}, {index_code}, {value_code});')
 
         elif isinstance(stmt, AssignIR):
             # Variable assignment
@@ -474,10 +481,323 @@ class LLVMBackend:
             # Expression statement (e.g., function call)
             expr_code = self._gen_expr(stmt.expr)
             result.append(f'{ind}{expr_code};')
+        
+        elif isinstance(stmt, WithIR):
+            # With statement (context manager)
+            # Special handling for nexc() calls
+            if isinstance(stmt.context_expr, CallIR) and stmt.context_expr.func_name == 'nexc':
+                # This is a nexc block - generate optimized native C code
+                result.extend(self._gen_nexc_block(stmt, indent))
+            else:
+                # Generic context manager (not yet implemented)
+                result.append(f'{ind}/* TODO: Generic context manager support */')
+                # For now, just execute the body without context manager
+                for body_stmt in stmt.body:
+                    result.extend(self._gen_stmt(body_stmt, indent))
 
         # elif 
         
         return result
+    
+    def _gen_nexc_block(self, stmt: WithIR, indent: int = 0) -> list:
+        """Generate optimized native C code for nexc block"""
+        ind = '    ' * indent
+        result = []
+        
+        # Extract target name from nexc() call
+        target_platform = 'cpu'  # default
+        if stmt.context_expr.args:
+            # Get the target platform from the first argument
+            arg = stmt.context_expr.args[0]
+            if isinstance(arg, ConstantIR) and arg.type_name == 'str':
+                # Will need to get actual string value from constants
+                pass
+        
+        result.append(f'{ind}{{')
+        result.append(f'{ind}    /* Native Execution Context (nexc) - {target_platform} target */')
+        
+        # Track native arrays and their types for this nexc block
+        nexc_arrays = {}
+        
+        # Process the body to find array allocations and generate native code
+        for body_stmt in stmt.body:
+            result.extend(self._gen_nexc_stmt(body_stmt, indent + 1, nexc_arrays, stmt.target))
+        
+        result.append(f'{ind}}}')
+        return result
+    
+    def _gen_nexc_stmt(self, stmt: StmtIR, indent: int, nexc_arrays: dict, context_var: str) -> list:
+        """Generate native C code for statements inside nexc block"""
+        ind = '    ' * indent
+        result = []
+        
+        if isinstance(stmt, SubscriptAssignIR):
+            # Array element assignment (array[i] = value)
+            obj_code = self._gen_nexc_expr(stmt.obj, nexc_arrays)
+            index_code = self._gen_nexc_expr(stmt.index, nexc_arrays)
+            value_code = self._gen_nexc_expr(stmt.value, nexc_arrays)
+            result.append(f'{ind}{obj_code}[{index_code}] = {value_code};')
+            return result
+        
+        elif isinstance(stmt, AssignIR):
+            # Check if this is a native array allocation
+            if isinstance(stmt.value, CallIR):
+                call = stmt.value
+                # Check for optim.array(), optim.zeros(), optim.ones()
+                if isinstance(call.obj, VariableIR) and call.obj.name == context_var:
+                    method_name = call.func_name
+                    if method_name in ['array', 'zeros', 'ones']:
+                        # This is a native array allocation
+                        size_expr = call.args[0] if call.args else ConstantIR(0, 'int')
+                        size_code = self._gen_nexc_expr(size_expr, nexc_arrays)
+                        
+                        # Get type from kwargs
+                        array_type = 'double'  # default
+                        if call.kwargs and 'type' in call.kwargs:
+                            type_expr = call.kwargs['type']
+                            # Check if type is an attribute (e.g., optim.fp32)
+                            if isinstance(type_expr, AttributeIR):
+                                # Get the type name from the attribute
+                                type_name = self._get_type_name_from_attr(type_expr)
+                                array_type = self._map_nexc_type_to_c(type_name)
+                            elif isinstance(type_expr, VariableIR):
+                                # Fallback to default for now
+                                array_type = 'double'
+                        
+                        # Generate native C array
+                        init_value = ''
+                        if method_name == 'zeros':
+                            init_value = ' = {0}'
+                        elif method_name == 'ones':
+                            result.append(f'{ind}{array_type} {stmt.target}[{size_code}];')
+                            result.append(f'{ind}for(int __i_{stmt.target} = 0; __i_{stmt.target} < {size_code}; __i_{stmt.target}++) {{')
+                            init_val = '1.0' if 'double' in array_type or 'float' in array_type else '1'
+                            result.append(f'{ind}    {stmt.target}[__i_{stmt.target}] = {init_val};')
+                            result.append(f'{ind}}}')
+                            nexc_arrays[stmt.target] = {'type': array_type, 'size': size_code}
+                            return result
+                        
+                        result.append(f'{ind}{array_type} {stmt.target}[{size_code}]{init_value};')
+                        nexc_arrays[stmt.target] = {'type': array_type, 'size': size_code}
+                        return result
+            
+            # Check if this is an array element assignment
+            if isinstance(stmt.value, BinOpIR) or isinstance(stmt.value, ConstantIR) or isinstance(stmt.value, VariableIR):
+                # Regular assignment inside nexc - use native types
+                value_code = self._gen_nexc_expr(stmt.value, nexc_arrays)
+                if stmt.target in nexc_arrays:
+                    # Already declared
+                    result.append(f'{ind}{stmt.target} = {value_code};')
+                else:
+                    # New variable - use native type
+                    result.append(f'{ind}double {stmt.target} = {value_code};')
+                    nexc_arrays[stmt.target] = {'type': 'double', 'size': 1}
+                return result
+        
+        elif isinstance(stmt, ExprStmtIR):
+            # Expression statement - might be subscript assignment
+            if isinstance(stmt.expr, SetAttrIR):
+                # This shouldn't happen in nexc
+                pass
+            else:
+                expr_code = self._gen_nexc_expr(stmt.expr, nexc_arrays)
+                result.append(f'{ind}{expr_code};')
+            return result
+        
+        elif isinstance(stmt, ForIR):
+            # For loop - generate native C for loop
+            # Assume range-based iteration for now
+            if isinstance(stmt.iter_expr, CallIR) and stmt.iter_expr.func_name == 'range':
+                # range(n) loop
+                if stmt.iter_expr.args:
+                    end_expr = stmt.iter_expr.args[0]
+                    end_code = self._gen_nexc_expr(end_expr, nexc_arrays)
+                    result.append(f'{ind}for(int {stmt.target} = 0; {stmt.target} < {end_code}; {stmt.target}++) {{')
+                    
+                    # Generate body
+                    for body_stmt in stmt.body:
+                        result.extend(self._gen_nexc_stmt(body_stmt, indent + 1, nexc_arrays, context_var))
+                    
+                    result.append(f'{ind}}}')
+                return result
+        
+        elif isinstance(stmt, IfIR):
+            # If statement
+            cond_code = self._gen_nexc_expr(stmt.condition, nexc_arrays)
+            result.append(f'{ind}if ({cond_code}) {{')
+            for body_stmt in stmt.then_body:
+                result.extend(self._gen_nexc_stmt(body_stmt, indent + 1, nexc_arrays, context_var))
+            if stmt.else_body:
+                result.append(f'{ind}}} else {{')
+                for body_stmt in stmt.else_body:
+                    result.extend(self._gen_nexc_stmt(body_stmt, indent + 1, nexc_arrays, context_var))
+            result.append(f'{ind}}}')
+            return result
+        
+        elif isinstance(stmt, WhileIR):
+            # While loop
+            cond_code = self._gen_nexc_expr(stmt.condition, nexc_arrays)
+            result.append(f'{ind}while ({cond_code}) {{')
+            for body_stmt in stmt.body:
+                result.extend(self._gen_nexc_stmt(body_stmt, indent + 1, nexc_arrays, context_var))
+            result.append(f'{ind}}}')
+            return result
+        
+        # Fallback: generate standard statement
+        result.extend(self._gen_stmt(stmt, indent))
+        return result
+    
+    def _gen_nexc_expr(self, expr: ExprIR, nexc_arrays: dict) -> str:
+        """Generate native C expression for nexc block"""
+        if isinstance(expr, ConstantIR):
+            # For nexc, we use literal values instead of Object wrappers
+            if expr.type_name == 'int':
+                # Get the actual value from the constant table
+                const_id = expr.value
+                if const_id in self.ir.consts:
+                    actual_value, _ = self.ir.consts[const_id]
+                    return str(actual_value)
+                return str(expr.value)
+            elif expr.type_name == 'float':
+                # Get the actual value from the constant table
+                const_id = expr.value
+                if const_id in self.ir.consts:
+                    actual_value, _ = self.ir.consts[const_id]
+                    return str(actual_value)
+                return str(expr.value)
+            elif expr.type_name == 'bool':
+                return '1' if expr.value else '0'
+            else:
+                # Fallback to regular generation
+                return self._gen_expr(expr)
+        
+        elif isinstance(expr, VariableIR):
+            return expr.name
+        
+        elif isinstance(expr, BinOpIR):
+            left = self._gen_nexc_expr(expr.left, nexc_arrays)
+            right = self._gen_nexc_expr(expr.right, nexc_arrays)
+            return f'({left} {expr.op} {right})'
+        
+        elif isinstance(expr, UnaryOpIR):
+            operand = self._gen_nexc_expr(expr.operand, nexc_arrays)
+            return f'({expr.op}{operand})'
+        
+        elif isinstance(expr, SubscriptIR):
+            # Array subscript
+            obj = self._gen_nexc_expr(expr.obj, nexc_arrays)
+            index = self._gen_nexc_expr(expr.index, nexc_arrays)
+            return f'{obj}[{index}]'
+        
+        elif isinstance(expr, AttributeIR):
+            # Attribute access (e.g., v.x)
+            # Check if obj is a native variable (in nexc_arrays) or external Nagini object
+            if isinstance(expr.obj, VariableIR):
+                var_name = expr.obj.name
+                # If the variable is NOT in nexc_arrays, it's from outside the nexc block
+                # and we need to use NgGetMember
+                if var_name not in nexc_arrays:
+                    # External Nagini object - use runtime function
+                    attr_const_id = expr.attr
+                    return f'NgGetMember(runtime, {var_name}, runtime->constants[{attr_const_id}])'
+            
+            # Native variable attribute access (or fallback)
+            obj = self._gen_nexc_expr(expr.obj, nexc_arrays)
+            # Get the attribute name from constants
+            if expr.attr in self.ir.consts:
+                const_value, _ = self.ir.consts[expr.attr]
+                attr_name = const_value.strip('"') if isinstance(const_value, str) else str(const_value)
+                return f'{obj}.{attr_name}'
+            return f'{obj}.attr_{expr.attr}'
+        
+        elif isinstance(expr, CallIR):
+            # Function call
+            if expr.func_name == 'range':
+                # range() is handled in for loops
+                if expr.args:
+                    return self._gen_nexc_expr(expr.args[0], nexc_arrays)
+            elif expr.func_name == 'cast' and isinstance(expr.obj, VariableIR):
+                # Handle optim.cast(type, value)
+                if len(expr.args) >= 2:
+                    target_type_expr = expr.args[0]
+                    value_expr = expr.args[1]
+                    
+                    # Get the target type name
+                    type_name = 'float'
+                    c_type = 'double'
+                    if isinstance(target_type_expr, AttributeIR):
+                        type_name = self._get_type_name_from_attr(target_type_expr)
+                        c_type = self._map_nexc_type_to_c(type_name)
+                    
+                    # Check if the value being cast is from a Nagini object (NgGetMember result)
+                    # If it's an attribute access on an external object, use NgCastTo* functions
+                    if isinstance(value_expr, AttributeIR) and isinstance(value_expr.obj, VariableIR):
+                        var_name = value_expr.obj.name
+                        if var_name not in nexc_arrays:
+                            # This is accessing a Nagini object from outside nexc
+                            # Use NgGetMember + NgCastTo* functions
+                            member_access = f'NgGetMember(runtime, {var_name}, runtime->constants[{value_expr.attr}])'
+                            
+                            # Determine which cast function to use based on target type
+                            if type_name in ['float', 'fp64', 'fp32', 'fp16', 'fp8', 'fp4']:
+                                # Use NgCastToFloat which returns double
+                                cast_result = f'NgCastToFloat(runtime, {member_access})'
+                                # If target is fp32, cast the double to float
+                                if type_name == 'fp32':
+                                    return f'((float){cast_result})'
+                                return cast_result
+                            else:
+                                # Use NgCastToInt for integer types
+                                cast_result = f'NgCastToInt(runtime, {member_access})'
+                                # Cast to specific int type if needed
+                                if c_type != 'int64_t':
+                                    return f'(({c_type}){cast_result})'
+                                return cast_result
+                    
+                    # For other values, generate normal cast
+                    value_code = self._gen_nexc_expr(value_expr, nexc_arrays)
+                    return f'(({c_type}){value_code})'
+            # Fallback
+            return self._gen_expr(expr)
+        
+        # Fallback to regular expression generation
+        return self._gen_expr(expr)
+    
+    def _get_type_name_from_attr(self, attr_expr: AttributeIR) -> str:
+        """Extract type name from attribute expression (e.g., optim.fp32 -> 'fp32')"""
+        # The attr field in AttributeIR contains the constant ID for the attribute name
+        # We need to look it up in the IR's constant table
+        if attr_expr.attr in self.ir.consts:
+            const_value, _ = self.ir.consts[attr_expr.attr]
+            # Remove quotes from string constant
+            if isinstance(const_value, str):
+                return const_value.strip('"')
+        return 'float'  # default fallback
+    
+    def _map_nexc_type_to_c(self, type_name: str) -> str:
+        """Map nexc type names to C type names"""
+        type_map = {
+            'int': 'int64_t',
+            'int64': 'int64_t',
+            'int32': 'int32_t',
+            'int16': 'int16_t',
+            'int8': 'int8_t',
+            'int2': 'int8_t',
+            'uint': 'uint64_t',
+            'uint64': 'uint64_t',
+            'uint32': 'uint32_t',
+            'uint16': 'uint16_t',
+            'uint8': 'uint8_t',
+            'uint2': 'uint8_t',
+            'float': 'double',
+            'fp64': 'double',
+            'fp32': 'float',
+            'fp16': 'uint16_t',  # Half precision (needs conversion)
+            'fp8': 'uint8_t',    # 8-bit float (needs conversion)
+            'fp4': 'uint8_t',    # 4-bit float (needs conversion)
+            'bool': 'uint8_t',   # Boolean as 1 byte
+        }
+        return type_map.get(type_name, 'double')
     
     def _gen_expr(self, expr: ExprIR) -> str:
         """Generate C code for an expression IR node"""
