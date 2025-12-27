@@ -1257,7 +1257,8 @@ Object* NgToString(Runtime* runtime, void* obj) {
                     // All methods now use (Runtime*, Tuple*, Dict*) signature
                     Object* args_array[1] = {o};
                     Tuple* args = (Tuple*)alloc_tuple(runtime, 1, args_array);
-                    Object* result = NgCall(runtime, str_func, args, NULL);
+                    Object* result = NgCall(runtime, INCREF(runtime, str_func), args, NULL);
+                    DECREF(runtime, str_func);
                     return result;
                 }
                 //  else {
@@ -1531,14 +1532,16 @@ int64_t hash(Runtime* runtime, Object* obj) {
             Function* hash_method = (Function*)dict_get(runtime, inst->__dict__, runtime->builtin_names.__hash__);
             if (hash_method) {
                 Tuple* self_arg = (Tuple*) alloc_tuple(runtime, 1, &obj);
-                Object* result = NgCall(runtime, hash_method, self_arg, NULL);
-                DECREF(runtime, (Object*)self_arg);
+                Object* result = NgCall(runtime, INCREF(runtime, hash_method), self_arg, NULL);
+                DECREF(runtime, hash_method);
                 if (result && result->__flags__.type == OBJ_TYPE_INT) {
                     IntObject* int_result = (IntObject*) result;
                     int64_t h = int_result->__value__;
                     if (h == -1) h = -2;
+                    DECREF(runtime, result);
                     return h;
                 }
+                if (result) DECREF(runtime, result);
             }
 
             return (int64_t)(uintptr_t)obj;
@@ -1711,9 +1714,9 @@ int dict_set(Runtime* runtime, void* dd, void* kk, void* vv) {
         }
 
         if (curr->hash == h && ObjectsEqual(runtime, curr->key, key)) { // key found, update value
-            curr->value = value;
             if (curr->value != value) {
                 if (curr->value) DECREF(runtime, curr->value);
+                curr->value = value;
                 INCREF(runtime, value);
             }
             return 0;
@@ -2378,11 +2381,15 @@ double NgCastToFloat(Runtime* runtime, void* obj) {
         InstanceObject* inst = (InstanceObject*)o;
         Object* float_method = NgGetMember(runtime, inst, runtime->builtin_names.__float__);
         if (float_method && float_method->__flags__.type == OBJ_TYPE_FUNCTION) {
-            Object* result = NgCall(runtime, float_method, alloc_tuple(runtime, 1, (Object* []) {o}), NULL);
+            Object* result = NgCall(runtime, INCREF(runtime, float_method), alloc_tuple(runtime, 1, (Object* []) {o}), NULL);
+            DECREF(runtime, float_method);
             if (result && result->__flags__.type == OBJ_TYPE_FLOAT) {
                 FloatObject* fobj = (FloatObject*)result;
-                return fobj->__value__;
+                double value = fobj->__value__;
+                DECREF(runtime, result);
+                return value;
             } else {
+                if (result) DECREF(runtime, result);
                 fprintf(stderr,
                     "TypeError: __float__ method did not return a float (returned '%s')\n",
                     obj_type_name(result)
@@ -2419,11 +2426,15 @@ int64_t NgCastToInt(Runtime* runtime, void* obj) {
         InstanceObject* inst = (InstanceObject*)o;
         Object* int_method = NgGetMember(runtime, inst, runtime->builtin_names.__int__);
         if (int_method && int_method->__flags__.type == OBJ_TYPE_FUNCTION) {
-            Object* result = NgCall(runtime, int_method, alloc_tuple(runtime, 1, (Object* []) {o}), NULL);
+            Object* result = NgCall(runtime, INCREF(runtime, int_method), alloc_tuple(runtime, 1, (Object* []) {o}), NULL);
+            DECREF(runtime, int_method);
             if (result && result->__flags__.type == OBJ_TYPE_INT) {
                 IntObject* iobj = (IntObject*)result;
-                return iobj->__value__;
+                int64_t value = iobj->__value__;
+                DECREF(runtime, result);
+                return value;
             } else {
+                if (result) DECREF(runtime, result);
                 fprintf(stderr,
                     "TypeError: __int__ method did not return an int (returned '%s')\n",
                     obj_type_name(result)
