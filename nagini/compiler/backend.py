@@ -464,7 +464,8 @@ class LLVMBackend:
         
         elif isinstance(stmt, WhileIR):
             # While loop
-            cond_code = self._gen_expr(stmt.condition)
+            cond_expr = self._gen_expr(stmt.condition)
+            cond_code = f'NgCastToInt(runtime, {cond_expr})'
             result.append(f'{ind}while ({cond_code}) {{')
             for body_stmt in stmt.body:
                 result.extend(self._gen_stmt(body_stmt, indent + 1))
@@ -472,10 +473,50 @@ class LLVMBackend:
         
         elif isinstance(stmt, ForIR):
             # For loop (simplified - assume range-like iteration)
-            iter_code = self._gen_expr(stmt.iter_expr)
-            # For now, handle simple range() calls
-            result.append(f'{ind}/* For loop: for {stmt.target} in {iter_code} */')
-            result.append(f'{ind}/* TODO: Implement full for loop support */')
+            if isinstance(stmt.iter_expr, CallIR) and stmt.iter_expr.func_name == 'range':
+                args = stmt.iter_expr.args
+                # Determine start, end, step
+                if len(args) == 1:
+                    start_expr = ConstantIR(self.ir.register_int_constant(0), 'int')
+                    end_expr = args[0]
+                    step_expr = ConstantIR(self.ir.register_int_constant(1), 'int')
+                elif len(args) == 2:
+                    start_expr = args[0]
+                    end_expr = args[1]
+                    step_expr = ConstantIR(self.ir.register_int_constant(1), 'int')
+                elif len(args) >= 3:
+                    start_expr = args[0]
+                    end_expr = args[1]
+                    step_expr = args[2]
+                else:
+                    return result
+
+                start_code = f'NgCastToInt(runtime, {self._gen_expr(start_expr)})'
+                end_code = f'NgCastToInt(runtime, {self._gen_expr(end_expr)})'
+                step_code = f'NgCastToInt(runtime, {self._gen_expr(step_expr)})'
+
+                result.append(f'{ind}{{')
+                result.append(f'{ind}    int64_t __start = {start_code};')
+                result.append(f'{ind}    int64_t __end = {end_code};')
+                result.append(f'{ind}    int64_t __step = {step_code};')
+                result.append(f'{ind}    if (__step == 0) {{ fprintf(stderr, "Runtime Error: range() step argument must not be zero\\n"); exit(1); }}')
+                result.append(f'{ind}    for (int64_t __i = __start; (__step > 0) ? (__i < __end) : (__i > __end); __i += __step) {{')
+
+                if stmt.target in self.declared_vars:
+                    result.append(f'{ind}        if ({stmt.target}) DECREF(runtime, {stmt.target});')
+                    result.append(f'{ind}        {stmt.target} = alloc_int(runtime, __i);')
+                else:
+                    result.append(f'{ind}        Object* {stmt.target} = alloc_int(runtime, __i);')
+                    self.declared_vars.add(stmt.target)
+
+                for body_stmt in stmt.body:
+                    result.extend(self._gen_stmt(body_stmt, indent + 2))
+
+                result.append(f'{ind}    }}')
+                result.append(f'{ind}}}')
+            else:
+                iter_code = self._gen_expr(stmt.iter_expr)
+                result.append(f'{ind}/* For loop: for {stmt.target} in {iter_code} (unsupported iterator) */')
         
         elif isinstance(stmt, ExprStmtIR):
             # Expression statement (e.g., function call)
