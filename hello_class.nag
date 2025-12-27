@@ -16,8 +16,7 @@ class Vec3:
         return f"Vec3({self.x:.2f}, {self.y:.2f}, {self.z:.2f})"
 
 def fibonacci(n: int):
-    a = 0
-    b = 1
+    a, b = 0, 1
     for _ in range(n):
         print(f'ib step: a={a}, b={b}')
         temp = a      # save old a

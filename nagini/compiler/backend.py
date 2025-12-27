@@ -19,6 +19,8 @@ from .ir import (
     TupleIR
 )
 
+fun_ids = {}
+
 def parse_func_call_args_kwargs(self, expr):
     num_args = len(expr.args)
     args = []
@@ -37,7 +39,7 @@ def parse_func_call_args_kwargs(self, expr):
     atuple = f'alloc_tuple(runtime, {num_args}, (Object*[]) {{{args_code}}})' if num_args > 0 else 'NULL'
     return atuple, 'NULL'  # kwargs not implemented yet
 
-def gen_uuid(length=8):
+def gen_uuid(length=16):
     characters = string.ascii_letters + string.digits  # a-z, A-Z, 0-9
     return ''.join(secrets.choice(characters) for _ in range(length))
 
@@ -100,6 +102,12 @@ class LLVMBackend:
         
         # Generate functions
         for func in self.ir.functions:
+            if func.name != 'main':
+                ident = fun_ids.get(func.name)
+                if ident is None:
+                    ident = gen_uuid(16)
+                    fun_ids[func.name] = ident
+                func.name = f'{func.name}_{ident}'
             self._gen_function(func)
 
         
@@ -1126,8 +1134,11 @@ class LLVMBackend:
                         return f'printf("{format_str}\\n", {", ".join(args_list)})'
                     else:
                         return 'printf("\\n")'
-                
-                return f'{expr.func_name}(runtime, (Tuple*){tup}, (Dict*){kwa})'
+                ident = fun_ids.get(expr.func_name)
+                if not ident:
+                    ident = gen_uuid(16)
+                    fun_ids[expr.func_name] = ident
+                return f'{expr.func_name}_{ident}(runtime, (Tuple*){tup}, (Dict*){kwa})'
         
         elif isinstance(expr, AttributeIR):
             # Member access
