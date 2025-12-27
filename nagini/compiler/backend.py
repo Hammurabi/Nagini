@@ -15,7 +15,8 @@ from .ir import (
     ConstantIR, VariableIR, BinOpIR, UnaryOpIR, CallIR, AttributeIR,
     AssignIR, SubscriptAssignIR, ReturnIR, IfIR, WhileIR, ForIR, ExprStmtIR, WithIR,
     ConstructorCallIR, LambdaIR, BoxIR, UnboxIR, SubscriptIR,
-    SetAttrIR, JoinedStrIR, FormattedValueIR, AugAssignIR
+    SetAttrIR, JoinedStrIR, FormattedValueIR, AugAssignIR, MultiAssignIR, SliceIR,
+    TupleIR
 )
 
 def parse_func_call_args_kwargs(self, expr):
@@ -256,6 +257,14 @@ class LLVMBackend:
         self.output_code.append('        fprintf(stderr, "Runtime Error: Function \'%s\' expects at least %ld arguments but got %ld\\n", func_name, expected, actual);')
         self.output_code.append('        exit(1);')
         self.output_code.append('    }')
+        self.output_code.append('}')
+        self.output_code.append('')
+
+        # Basic slice helper (placeholder for future full implementation)
+        self.output_code.append('Object* NgSlice(Runtime* runtime, void* obj, void* start, void* stop, void* step) {')
+        self.output_code.append('    (void)runtime; (void)obj; (void)start; (void)stop; (void)step;')
+        self.output_code.append('    /* TODO: Implement slicing semantics */')
+        self.output_code.append('    return NULL;')
         self.output_code.append('}')
         self.output_code.append('')
     
@@ -525,7 +534,11 @@ class LLVMBackend:
             obj_code = self._gen_expr(stmt.obj)
             index_code = self._gen_expr(stmt.index)
             value_code = self._gen_expr(stmt.value)
-            result.append(f'{ind}NgSetItem(runtime, {obj_code}, {index_code}, {value_code});')
+            result.append(f'{ind}{obj_code}[{index_code}] = {value_code};')
+
+        elif isinstance(stmt, MultiAssignIR):
+            for assign_stmt in stmt.assignments:
+                result.extend(self._gen_stmt(assign_stmt, indent))
 
         elif isinstance(stmt, AssignIR):
             # Variable assignment
@@ -688,6 +701,11 @@ class LLVMBackend:
             index_code = self._gen_nexc_expr(stmt.index, nexc_arrays)
             value_code = self._gen_nexc_expr(stmt.value, nexc_arrays)
             result.append(f'{ind}{obj_code}[{index_code}] = {value_code};')
+            return result
+
+        elif isinstance(stmt, MultiAssignIR):
+            for assign_stmt in stmt.assignments:
+                result.extend(self._gen_nexc_stmt(assign_stmt, indent, nexc_arrays, context_var))
             return result
         
         elif isinstance(stmt, AssignIR):
@@ -998,6 +1016,12 @@ class LLVMBackend:
         elif isinstance(expr, VariableIR):
             # Variable reference
             return expr.name
+
+        elif isinstance(expr, TupleIR):
+            elements_code = [self._gen_expr(e) for e in expr.elements]
+            if elements_code:
+                return f'alloc_tuple(runtime, {len(elements_code)}, (Object*[]) {{{", ".join(elements_code)}}})'
+            return 'alloc_tuple(runtime, 0, NULL)'
         
         elif isinstance(expr, BinOpIR):
             # Binary operation
@@ -1108,6 +1132,11 @@ class LLVMBackend:
         elif isinstance(expr, SubscriptIR):
             # Subscript access (obj[index])
             obj_code = self._gen_expr(expr.obj)
+            if isinstance(expr.index, SliceIR):
+                start_code = self._gen_expr(expr.index.start) if expr.index.start else 'NULL'
+                stop_code = self._gen_expr(expr.index.stop) if expr.index.stop else 'NULL'
+                step_code = self._gen_expr(expr.index.step) if expr.index.step else 'NULL'
+                return f'NgSlice(runtime, {obj_code}, {start_code}, {stop_code}, {step_code})'
             index_code = self._gen_expr(expr.index)
             return f'{obj_code}[{index_code}]'
         

@@ -79,6 +79,20 @@ class SubscriptIR(ExprIR):
     obj: ExprIR
     index: ExprIR
 
+
+@dataclass
+class SliceIR(ExprIR):
+    """Slice expression (start:stop:step)"""
+    start: Optional[ExprIR]
+    stop: Optional[ExprIR]
+    step: Optional[ExprIR]
+
+
+@dataclass
+class TupleIR(ExprIR):
+    """Tuple literal"""
+    elements: List[ExprIR]
+
 @dataclass
 class JoinedStrIR(ExprIR):
     """Joined string (f-string)"""
@@ -140,6 +154,12 @@ class SubscriptAssignIR(StmtIR):
     obj: ExprIR
     index: ExprIR
     value: ExprIR
+
+
+@dataclass
+class MultiAssignIR(StmtIR):
+    """Multiple assignments produced by tuple unpacking"""
+    assignments: List[AssignIR]
 
 
 @dataclass
@@ -427,7 +447,9 @@ class NaginiIR:
                         val = self._convert_expr_to_ir(stmt.value)
                         return AssignIR(tgt, val)
                     elif isinstance(target, ast.Tuple):
-                        raise NotImplementedError("Tuple unpacking in assignments is not supported yet.")
+                        value_ir = self._convert_expr_to_ir(stmt.value)
+                        assignments = self._create_tuple_assignments(target, stmt.value, value_ir)
+                        return MultiAssignIR(assignments) if assignments else None
                     elif isinstance(target, ast.Subscript):
                         # Subscript assignment (e.g., array[i] = value)
                         obj_ir = self._convert_expr_to_ir(target.value)
@@ -560,6 +582,10 @@ class NaginiIR:
             right = self._convert_expr_to_ir(expr.right)
             op = self._binop_to_str(expr.op)
             return BinOpIR(left, op, right)
+
+        elif isinstance(expr, ast.Tuple):
+            elements = [self._convert_expr_to_ir(e) for e in expr.elts]
+            return TupleIR(elements)
         
         elif isinstance(expr, ast.AugAssign):
             # Augmented assignment (e.g., x += 1)
@@ -654,6 +680,12 @@ class NaginiIR:
             obj = self._convert_expr_to_ir(expr.value)
             index = self._convert_expr_to_ir(expr.slice)
             return SubscriptIR(obj, index)
+
+        elif isinstance(expr, ast.Slice):
+            start = self._convert_expr_to_ir(expr.lower) if expr.lower else None
+            stop = self._convert_expr_to_ir(expr.upper) if expr.upper else None
+            step = self._convert_expr_to_ir(expr.step) if expr.step else None
+            return SliceIR(start, stop, step)
         
         elif isinstance(expr, ast.JoinedStr):
             # f-string (JoinedStr)
@@ -688,6 +720,31 @@ class NaginiIR:
         # Return a placeholder for unsupported expressions
         # TODO: Add better error handling or warnings for unsupported expression types
         raise NotImplementedError(f"Expression type {type(expr)} not supported in IR conversion.")
+    
+    def _create_tuple_assignments(self, target_tuple: ast.Tuple, value_node: ast.AST, value_expr: ExprIR) -> List[AssignIR]:
+        """Create AssignIR list for tuple unpacking."""
+        assignments: List[AssignIR] = []
+        value_elts = value_node.elts if isinstance(value_node, ast.Tuple) else None
+
+        for idx, elt in enumerate(target_tuple.elts):
+            source_node = value_elts[idx] if value_elts and idx < len(value_elts) else None
+            if source_node is not None:
+                source_expr = self._convert_expr_to_ir(source_node)
+            else:
+                index_ir = ConstantIR(self.register_int_constant(idx), 'int')
+                source_expr = SubscriptIR(value_expr, index_ir)
+
+            if isinstance(elt, ast.Name):
+                assignments.append(AssignIR(elt.id, source_expr))
+            elif isinstance(elt, ast.Tuple):
+                nested_value_node = source_node if isinstance(source_node, ast.Tuple) else value_node
+                assignments.extend(self._create_tuple_assignments(elt, nested_value_node, source_expr))
+            elif isinstance(elt, ast.Starred) and isinstance(elt.value, ast.Name):
+                # Starred target gets the remaining slice from current position
+                slice_ir = SliceIR(ConstantIR(self.register_int_constant(idx), 'int'), None, None)
+                assignments.append(AssignIR(elt.value.id, SubscriptIR(value_expr, slice_ir)))
+            # Ignore other target types for now
+        return assignments
     
     def _extract_type_name(self, annotation) -> str:
         """Extract type name from annotation (helper for lambda)"""
