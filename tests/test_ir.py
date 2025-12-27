@@ -8,6 +8,7 @@ from nagini.compiler.ir import (
     SliceIR,
     SubscriptIR,
     SubscriptAssignIR,
+    VariableIR,
 )
 
 
@@ -23,10 +24,11 @@ class IRGenerationTests(unittest.TestCase):
         body = self._main_body("a, b = (1, 2)")
         self.assertIsInstance(body[0], MultiAssignIR)
         assigns = body[0].assignments
-        self.assertEqual(len(assigns), 2)
-        self.assertIsInstance(assigns[0], AssignIR)
-        self.assertEqual(assigns[0].target, "a")
-        self.assertEqual(assigns[1].target, "b")
+        self.assertEqual(len(assigns), 4)
+        self.assertTrue(all(a.target.startswith("__tmp_unpack_") for a in assigns[:2]))
+        self.assertIsInstance(assigns[2], AssignIR)
+        self.assertEqual(assigns[2].target, "a")
+        self.assertEqual(assigns[3].target, "b")
 
     def test_subscript_slicing_ir(self):
         body = self._main_body("x = arr[1:5:2]")
@@ -42,6 +44,16 @@ class IRGenerationTests(unittest.TestCase):
         body = self._main_body("arr[0] = 3")
         self.assertIsInstance(body[0], SubscriptAssignIR)
         self.assertIsInstance(body[0].index, ConstantIR)
+
+    def test_tuple_unpack_uses_temporaries_for_swap(self):
+        body = self._main_body("x = 1\ny = 2\nx, y = y, x")
+        self.assertIsInstance(body[2], MultiAssignIR)
+        assigns = body[2].assignments
+        self.assertTrue(all(a.target.startswith("__tmp_unpack_") for a in assigns[:2]))
+        self.assertIsInstance(assigns[2].value, VariableIR)
+        self.assertIsInstance(assigns[3].value, VariableIR)
+        self.assertTrue(assigns[2].value.name.startswith("__tmp_unpack_"))
+        self.assertTrue(assigns[3].value.name.startswith("__tmp_unpack_"))
 
 
 if __name__ == "__main__":
