@@ -644,9 +644,18 @@ class LLVMBackend:
         if isinstance(expr, ConstantIR):
             # For nexc, we use literal values instead of Object wrappers
             if expr.type_name == 'int':
-                # Get the actual value from the constant
+                # Get the actual value from the constant table
+                const_id = expr.value
+                if const_id in self.ir.consts:
+                    actual_value, _ = self.ir.consts[const_id]
+                    return str(actual_value)
                 return str(expr.value)
             elif expr.type_name == 'float':
+                # Get the actual value from the constant table
+                const_id = expr.value
+                if const_id in self.ir.consts:
+                    actual_value, _ = self.ir.consts[const_id]
+                    return str(actual_value)
                 return str(expr.value)
             elif expr.type_name == 'bool':
                 return '1' if expr.value else '0'
