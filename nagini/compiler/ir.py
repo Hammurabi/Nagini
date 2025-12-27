@@ -259,7 +259,7 @@ class NaginiIR:
         self.consts_dict[key] = ident
         return ident
     
-    def register_int_constant(self, value: int) -> str:
+    def register_int_constant(self, value: int) -> int:
         """Register an integer constant and return its unique name"""
         # Use tuple key (type, value) to avoid collision between int and float
         # e.g., 2 (int) and 2.0 (float) should be different constants
@@ -736,8 +736,6 @@ class NaginiIR:
                     source_index = value_len - (total_targets - idx)
                 else:
                     source_index = idx
-                if value_len is not None and source_index < 0:
-                    source_index = 0
 
             source_node = value_elts[source_index] if value_elts and source_index < len(value_elts) else None
             if source_node is not None:
