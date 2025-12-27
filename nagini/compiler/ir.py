@@ -725,23 +725,39 @@ class NaginiIR:
         """Create AssignIR list for tuple unpacking."""
         assignments: List[AssignIR] = []
         value_elts = value_node.elts if isinstance(value_node, ast.Tuple) else None
+        value_len = len(value_elts) if value_elts is not None else None
+        star_index = next((i for i, e in enumerate(target_tuple.elts) if isinstance(e, ast.Starred)), None)
+        total_targets = len(target_tuple.elts)
 
         for idx, elt in enumerate(target_tuple.elts):
-            source_node = value_elts[idx] if value_elts and idx < len(value_elts) else None
+            source_index = idx
+            if star_index is not None and idx > star_index:
+                if value_len is not None:
+                    source_index = value_len - (total_targets - idx)
+                else:
+                    source_index = idx
+
+            source_node = value_elts[source_index] if value_elts and source_index < len(value_elts) else None
             if source_node is not None:
                 source_expr = self._convert_expr_to_ir(source_node)
             else:
-                index_ir = ConstantIR(self.register_int_constant(idx), 'int')
+                index_ir = ConstantIR(self.register_int_constant(source_index), 'int')
                 source_expr = SubscriptIR(value_expr, index_ir)
 
             if isinstance(elt, ast.Name):
                 assignments.append(AssignIR(elt.id, source_expr))
             elif isinstance(elt, ast.Tuple):
-                nested_value_node = source_node if isinstance(source_node, ast.Tuple) else value_node
+                nested_value_node = source_node if isinstance(source_node, ast.Tuple) else None
                 assignments.extend(self._create_tuple_assignments(elt, nested_value_node, source_expr))
             elif isinstance(elt, ast.Starred) and isinstance(elt.value, ast.Name):
                 # Starred target gets the remaining slice from current position
-                slice_ir = SliceIR(ConstantIR(self.register_int_constant(idx), 'int'), None, None)
+                start_const = ConstantIR(self.register_int_constant(idx), 'int')
+                stop_expr = None
+                if value_len is not None:
+                    remaining_after = total_targets - idx - 1
+                    stop_index = value_len - remaining_after
+                    stop_expr = ConstantIR(self.register_int_constant(stop_index), 'int')
+                slice_ir = SliceIR(start_const, stop_expr, None)
                 assignments.append(AssignIR(elt.value.id, SubscriptIR(value_expr, slice_ir)))
             # Ignore other target types for now
         return assignments
