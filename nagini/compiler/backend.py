@@ -503,7 +503,7 @@ class LLVMBackend:
                 result.append(f'{ind}    int64_t __start = {start_code};')
                 result.append(f'{ind}    int64_t __end = {end_code};')
                 result.append(f'{ind}    int64_t __step = {step_code};')
-                result.append(f'{ind}    if (__step == 0) {{ fprintf(stderr, "Runtime Error: range() step argument must not be zero\\n"); exit(1); }}')
+                result.append(f'{ind}    if (__step == 0) {{ fprintf(stderr, "Runtime Error: range() step argument must not be zero.\\n"); exit(1); }}')
                 result.append(f'{ind}    for (int64_t __i = __start; (__step > 0) ? (__i < __end) : (__i > __end); __i += __step) {{')
                 result.append(f'{ind}        if ({stmt.target}) DECREF(runtime, {stmt.target});')
                 result.append(f'{ind}        {stmt.target} = alloc_int(runtime, __i);')
