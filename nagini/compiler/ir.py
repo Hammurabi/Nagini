@@ -243,6 +243,7 @@ class NaginiIR:
         self.const_count = 0
         self.consts = {}
         self.consts_dict = {}
+        self.temp_counter = 0
         
         # Cache for converted methods to avoid double conversion
         self.method_ir_cache = {}
@@ -721,13 +722,15 @@ class NaginiIR:
         # TODO: Add better error handling or warnings for unsupported expression types
         raise NotImplementedError(f"Expression type {type(expr)} not supported in IR conversion.")
     
-    def _create_tuple_assignments(self, target_tuple: ast.Tuple, value_node: ast.AST, value_expr: ExprIR) -> List[AssignIR]:
+    def _create_tuple_assignments(self, target_tuple: ast.Tuple, value_node: ast.AST, value_expr: ExprIR, value_pre_evaluated: bool = False) -> List[AssignIR]:
         """Create AssignIR list for tuple unpacking."""
         assignments: List[AssignIR] = []
         value_elts = value_node.elts if isinstance(value_node, ast.Tuple) else None
         value_len = len(value_elts) if value_elts is not None else None
         star_index = next((i for i, e in enumerate(target_tuple.elts) if isinstance(e, ast.Starred)), None)
         total_targets = len(target_tuple.elts)
+
+        staged_targets = []
 
         for idx, elt in enumerate(target_tuple.elts):
             source_index = idx
@@ -738,18 +741,8 @@ class NaginiIR:
                     source_index = idx
 
             source_node = value_elts[source_index] if value_elts and source_index < len(value_elts) else None
-            if source_node is not None:
-                source_expr = self._convert_expr_to_ir(source_node)
-            else:
-                index_ir = ConstantIR(self.register_int_constant(source_index), 'int')
-                source_expr = SubscriptIR(value_expr, index_ir)
 
-            if isinstance(elt, ast.Name):
-                assignments.append(AssignIR(elt.id, source_expr))
-            elif isinstance(elt, ast.Tuple):
-                nested_value_node = source_node if isinstance(source_node, ast.Tuple) else None
-                assignments.extend(self._create_tuple_assignments(elt, nested_value_node, source_expr))
-            elif isinstance(elt, ast.Starred) and isinstance(elt.value, ast.Name):
+            if isinstance(elt, ast.Starred) and isinstance(elt.value, ast.Name):
                 # Starred target gets the remaining slice from current position
                 start_const = ConstantIR(self.register_int_constant(idx), 'int')
                 stop_expr = None
@@ -758,7 +751,28 @@ class NaginiIR:
                     stop_index = value_len - remaining_after
                     stop_expr = ConstantIR(self.register_int_constant(stop_index), 'int')
                 slice_ir = SliceIR(start_const, stop_expr, None)
-                assignments.append(AssignIR(elt.value.id, SubscriptIR(value_expr, slice_ir)))
+                source_expr = SubscriptIR(value_expr, slice_ir)
+            else:
+                if value_pre_evaluated or source_node is None:
+                    index_ir = ConstantIR(self.register_int_constant(source_index), 'int')
+                    source_expr = SubscriptIR(value_expr, index_ir)
+                else:
+                    source_expr = self._convert_expr_to_ir(source_node)
+
+            tmp_name = f"__tmp_unpack_{self.temp_counter}"
+            self.temp_counter += 1
+            tmp_var = VariableIR(tmp_name)
+            assignments.append(AssignIR(tmp_name, source_expr))
+            staged_targets.append((elt, source_node, tmp_var))
+
+        for elt, source_node, tmp_var in staged_targets:
+            if isinstance(elt, ast.Name):
+                assignments.append(AssignIR(elt.id, tmp_var))
+            elif isinstance(elt, ast.Tuple):
+                nested_value_node = source_node if isinstance(source_node, ast.Tuple) else None
+                assignments.extend(self._create_tuple_assignments(elt, nested_value_node, tmp_var, True))
+            elif isinstance(elt, ast.Starred) and isinstance(elt.value, ast.Name):
+                assignments.append(AssignIR(elt.value.id, tmp_var))
             # Ignore unsupported target types (e.g., attributes or subscripts) for now
         return assignments
     
