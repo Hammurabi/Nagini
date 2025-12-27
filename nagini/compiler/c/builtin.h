@@ -78,11 +78,14 @@ Object* NgGetMember(Runtime* runtime, void* ii, void* mm);
 Object* NgMod(Runtime* runtime, void* aa, void* bb);
 Object* NgPow(Runtime* runtime, void* aa, void* bb);
 void NgSetMember(Runtime* runtime, void* ii, void* mm, void* vv);
+Object* NgGetItem(Runtime* runtime, void* obj, void* index);
+void NgSetItem(Runtime* runtime, void* obj, void* index, void* value);
 void NgDelMember(Runtime* runtime, InstanceObject* instance, StringObject* member);
 Object* NgToString(Runtime* runtime, void* obj);
 const char* NgToCString(Runtime* runtime, void* obj);
 Object* NgCall(Runtime* runtime, void* func, void* args, void* kwargs);
 void NgGetTypeName(Runtime* runtime, void* oo, char* buffer, size_t size);
+int64_t NgCastToInt(Runtime* runtime, void* obj);
 
 #if defined(__linux__) || defined(__unix__)
 void siphash_random_key(uint8_t key[16]) {
@@ -490,6 +493,94 @@ void NgSetMember(Runtime* runtime, void* ii, void* mm, void* vv) {
     }
 
     dict_set(runtime, dict, (Object*)member, value);
+}
+
+Object* NgGetItem(Runtime* runtime, void* obj, void* index) {
+    Object* container = (Object*)obj;
+    if (!container) {
+        fprintf(stderr, "TypeError: 'NoneType' object is not subscriptable\n");
+        exit(1);
+    }
+
+    switch (container->__flags__.type) {
+        case OBJ_TYPE_LIST: {
+            List* list = (List*)container;
+            int64_t idx = NgCastToInt(runtime, index);
+            if (idx < 0) idx += (int64_t)list->size;
+            if (idx < 0 || (size_t)idx >= list->size) {
+                fprintf(stderr, "IndexError: list index out of range\n");
+                exit(1);
+            }
+            return list->items[idx];
+        }
+        case OBJ_TYPE_TUPLE: {
+            Tuple* tuple = (Tuple*)container;
+            int64_t idx = NgCastToInt(runtime, index);
+            if (idx < 0) idx += (int64_t)tuple->size;
+            if (idx < 0 || (size_t)idx >= tuple->size) {
+                fprintf(stderr, "IndexError: tuple index out of range\n");
+                exit(1);
+            }
+            return tuple->items[idx];
+        }
+        case OBJ_TYPE_DICT: {
+            Object* value = dict_get(runtime, obj, index);
+            if (!value) {
+                fprintf(stderr, "KeyError: key not found\n");
+                exit(1);
+            }
+            return value;
+        }
+        default:
+            fprintf(stderr,
+                "TypeError: object of type '%s' is not subscriptable\n",
+                obj_type_name(container)
+            );
+            exit(1);
+    }
+
+    return NULL;
+}
+
+void NgSetItem(Runtime* runtime, void* obj, void* index, void* value) {
+    Object* container = (Object*)obj;
+    if (!container) {
+        fprintf(stderr, "TypeError: cannot set item on None\n");
+        exit(1);
+    }
+
+    switch (container->__flags__.type) {
+        case OBJ_TYPE_LIST: {
+            List* list = (List*)container;
+            int64_t idx = NgCastToInt(runtime, index);
+            if (idx < 0) idx += (int64_t)list->size;
+            if (idx < 0 || (size_t)idx >= list->size) {
+                fprintf(stderr, "IndexError: list assignment index out of range\n");
+                exit(1);
+            }
+            if (list->items[idx] != value) {
+                if (list->items[idx]) {
+                    DECREF(runtime, list->items[idx]);
+                }
+                list->items[idx] = (Object*)value;
+                INCREF(runtime, value);
+            }
+            return;
+        }
+        case OBJ_TYPE_DICT: {
+            dict_set(runtime, obj, index, value);
+            return;
+        }
+        case OBJ_TYPE_TUPLE:
+            fprintf(stderr, "TypeError: 'tuple' object does not support item assignment\n");
+            exit(1);
+        default:
+            fprintf(stderr,
+                "TypeError: object of type '%s' does not support item assignment\n",
+                obj_type_name(container)
+            );
+            exit(1);
+    }
 }
 
 void NgDelMember(Runtime* runtime, InstanceObject* instance, StringObject* member) {
