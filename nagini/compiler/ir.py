@@ -449,7 +449,7 @@ class NaginiIR:
                     elif isinstance(target, ast.Tuple):
                         value_ir = self._convert_expr_to_ir(stmt.value)
                         assignments = self._create_tuple_assignments(target, stmt.value, value_ir)
-                        return MultiAssignIR(assignments) if assignments else None
+                        return MultiAssignIR(assignments)
                     elif isinstance(target, ast.Subscript):
                         # Subscript assignment (e.g., array[i] = value)
                         obj_ir = self._convert_expr_to_ir(target.value)
@@ -736,6 +736,8 @@ class NaginiIR:
                     source_index = value_len - (total_targets - idx)
                 else:
                     source_index = idx
+                if value_len is not None and source_index < 0:
+                    source_index = 0
 
             source_node = value_elts[source_index] if value_elts and source_index < len(value_elts) else None
             if source_node is not None:
@@ -759,7 +761,7 @@ class NaginiIR:
                     stop_expr = ConstantIR(self.register_int_constant(stop_index), 'int')
                 slice_ir = SliceIR(start_const, stop_expr, None)
                 assignments.append(AssignIR(elt.value.id, SubscriptIR(value_expr, slice_ir)))
-            # Ignore other target types for now
+            # Ignore unsupported target types (e.g., attributes or subscripts) for now
         return assignments
     
     def _extract_type_name(self, annotation) -> str:

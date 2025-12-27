@@ -263,7 +263,7 @@ class LLVMBackend:
         # Basic subscript helper (placeholder for future full implementation)
         self.output_code.append('void NgSetItem(Runtime* runtime, void* obj, void* index, void* value) {')
         self.output_code.append('    (void)runtime; (void)obj; (void)index; (void)value;')
-        self.output_code.append('    /* TODO: Implement subscription assignment */')
+        self.output_code.append('    /* TODO: Implement subscript assignment */')
         self.output_code.append('}')
         self.output_code.append('')
 
@@ -544,8 +544,7 @@ class LLVMBackend:
             result.append(f'{ind}NgSetItem(runtime, {obj_code}, {index_code}, {value_code});')
 
         elif isinstance(stmt, MultiAssignIR):
-            for assign_stmt in stmt.assignments:
-                result.extend(self._gen_stmt(assign_stmt, indent))
+            result.extend(self._emit_multi_assign(stmt, indent, self._gen_stmt))
 
         elif isinstance(stmt, AssignIR):
             # Variable assignment
@@ -711,8 +710,7 @@ class LLVMBackend:
             return result
 
         elif isinstance(stmt, MultiAssignIR):
-            for assign_stmt in stmt.assignments:
-                result.extend(self._gen_nexc_stmt(assign_stmt, indent, nexc_arrays, context_var))
+            result.extend(self._emit_multi_assign(stmt, indent, lambda s, i: self._gen_nexc_stmt(s, i, nexc_arrays, context_var)))
             return result
         
         elif isinstance(stmt, AssignIR):
@@ -822,6 +820,13 @@ class LLVMBackend:
         # Fallback: generate standard statement
         result.extend(self._gen_stmt(stmt, indent))
         return result
+
+    def _emit_multi_assign(self, stmt: MultiAssignIR, indent: int, emitter) -> list:
+        """Helper to expand MultiAssignIR using provided emitter."""
+        expanded = []
+        for assign_stmt in stmt.assignments:
+            expanded.extend(emitter(assign_stmt, indent))
+        return expanded
     
     def _gen_nexc_expr(self, expr: ExprIR, nexc_arrays: dict) -> str:
         """Generate native C expression for nexc block"""
