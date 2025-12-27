@@ -95,10 +95,8 @@ class LLVMBackend:
         """Ensure an int constant is registered and return its id."""
         key = ('int', value)
         if key in self.ir.consts_dict:
-            ident_raw = self.ir.consts_dict[key]
-        else:
-            ident_raw = self.ir.register_int_constant(value)
-        ident_int = int(ident_raw)
+            return int(self.ir.consts_dict[key])
+        ident_int = int(self.ir.register_int_constant(value))
         self.ir.consts_dict[key] = ident_int
         return ident_int
 
@@ -138,9 +136,9 @@ class LLVMBackend:
         for _, method_ir in self.ir.method_ir_cache.items():
             scan_stmts(method_ir.body)
 
-        if need_zero:
+        if need_zero and self._zero_const_id is None:
             self._zero_const_id = self._ensure_int_const(0)
-        if need_one:
+        if need_one and self._one_const_id is None:
             self._one_const_id = self._ensure_int_const(1)
     
     def _gen_headers(self, output_code):
