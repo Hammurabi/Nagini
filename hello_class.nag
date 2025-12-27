@@ -21,8 +21,8 @@ if __name__ == "__main__":
     print(v)
     total = 0
     for i in range(5):
-        total = total + i
-    print(total)
+        total += 5
+        print(total)
     # with nexc('cpu') as optim: # or gpu
     #     array = optim.array(300, type=optim.fp32)
     #     for i in range(100):

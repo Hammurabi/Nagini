@@ -35,6 +35,12 @@ class BinOpIR(ExprIR):
     op: str  # +, -, *, /, //, %, **, ==, !=, <, <=, >, >=, and, or
     right: ExprIR
 
+@dataclass
+class AugAssignIR(ExprIR):
+    """Augmented assignment operation"""
+    target: ExprIR
+    op: str  # +=, -=, *=, /=, //=, %=
+    value: ExprIR
 
 @dataclass
 class UnaryOpIR(ExprIR):
@@ -489,6 +495,12 @@ class NaginiIR:
                 body = [self._convert_stmt_to_ir(s) for s in stmt.body]
                 body = [s for s in body if s]
                 return ForIR(target, iter_expr, body)
+            
+        elif isinstance(stmt, ast.AugAssign):
+            # Augmented assignment (e.g., x += 1)
+            target_ir = self._convert_expr_to_ir(stmt.target)
+            value_ir = self._convert_expr_to_ir(stmt.value)
+            return ExprStmtIR(AugAssignIR(target_ir, self._binop_to_str(stmt.op), value_ir))
         
         elif isinstance(stmt, ast.With):
             # With statement (context manager)
@@ -548,6 +560,14 @@ class NaginiIR:
             right = self._convert_expr_to_ir(expr.right)
             op = self._binop_to_str(expr.op)
             return BinOpIR(left, op, right)
+        
+        elif isinstance(expr, ast.AugAssign):
+            # Augmented assignment (e.g., x += 1)
+            return AugAssignIR(
+                self._convert_expr_to_ir(expr.target),
+                self._binop_to_str(expr.op) + '=',
+                self._convert_expr_to_ir(expr.value)
+            )
         
         elif isinstance(expr, ast.UnaryOp):
             operand = self._convert_expr_to_ir(expr.operand)

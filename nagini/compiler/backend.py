@@ -8,13 +8,19 @@ import os
 import sys
 from typing import Dict, Optional
 from .parser import ClassInfo, FieldInfo, FunctionInfo
+import secrets
+import string
 from .ir import (
     NaginiIR, FunctionIR, StmtIR, ExprIR,
     ConstantIR, VariableIR, BinOpIR, UnaryOpIR, CallIR, AttributeIR,
     AssignIR, SubscriptAssignIR, ReturnIR, IfIR, WhileIR, ForIR, ExprStmtIR, WithIR,
     ConstructorCallIR, LambdaIR, BoxIR, UnboxIR, SubscriptIR,
-    SetAttrIR, JoinedStrIR, FormattedValueIR
+    SetAttrIR, JoinedStrIR, FormattedValueIR, AugAssignIR
 )
+
+def gen_uuid(length=8):
+    characters = string.ascii_letters + string.digits  # a-z, A-Z, 0-9
+    return ''.join(secrets.choice(characters) for _ in range(length))
 
 def load_c_from_file(filename: str) -> str:
     """Utility function to load C code from a file"""
@@ -469,6 +475,13 @@ class LLVMBackend:
             value_code = self._gen_expr(stmt.value)
             result.append(f'{ind}NgSetMember(runtime, {obj_code}, runtime->constants[{stmt.attr}], {value_code});')
         
+        elif isinstance(stmt, AugAssignIR):
+            # Augmented assignment (e.g., x += y)
+            target_code = self._gen_expr(stmt.target)
+            value_code = self._gen_expr(stmt.value)
+            op = stmt.op
+            result.append(f'{ind}{target_code} = NgBinaryOp(runtime, {target_code}, {value_code}, "{op}");')
+        
         elif isinstance(stmt, SubscriptAssignIR):
             # Subscript assignment (obj[index] = value)
             obj_code = self._gen_expr(stmt.obj)
@@ -558,14 +571,15 @@ class LLVMBackend:
                     result.append(f'{ind}Object* {stmt.target} = NULL;')
                     self.declared_vars.add(stmt.target)
 
+                temp_id = gen_uuid(16)
                 result.append(f'{ind}{{')
-                result.append(f'{ind}    int64_t __start = {start_code};')
-                result.append(f'{ind}    int64_t __end = {end_code};')
-                result.append(f'{ind}    int64_t __step = {step_code};')
-                result.append(f'{ind}    if (__step == 0) {{ fprintf(stderr, "Runtime Error: range() step argument must not be zero.\\n"); exit(1); }}')
-                result.append(f'{ind}    for (int64_t __i = __start; (__step > 0) ? (__i < __end) : (__i > __end); __i += __step) {{')
+                result.append(f'{ind}    int64_t __start{temp_id} = {start_code};')
+                result.append(f'{ind}    int64_t __end{temp_id} = {end_code};')
+                result.append(f'{ind}    int64_t __step{temp_id} = {step_code};')
+                result.append(f'{ind}    if (__step{temp_id} == 0) {{ fprintf(stderr, "Runtime Error: range() step argument must not be zero.\\n"); exit(1); }}')
+                result.append(f'{ind}    for (int64_t __i{temp_id} = __start{temp_id}; (__step{temp_id} > 0) ? (__i{temp_id} < __end{temp_id}) : (__i{temp_id} > __end{temp_id}); __i{temp_id} += __step{temp_id}) {{')
                 result.append(f'{ind}        if ({stmt.target}) DECREF(runtime, {stmt.target});')
-                result.append(f'{ind}        {stmt.target} = alloc_int(runtime, __i);')
+                result.append(f'{ind}        {stmt.target} = alloc_int(runtime, __i{temp_id});')
 
                 for body_stmt in stmt.body:
                     result.extend(self._gen_stmt(body_stmt, indent + 2))
@@ -913,6 +927,28 @@ class LLVMBackend:
                 return f'runtime->constants[{expr.value}]'
             else:
                 raise ValueError(f'Unknown constant type: {expr.type_name}')
+        
+        elif isinstance(expr, AugAssignIR):
+            # Augmented assignment (e.g., x += y)
+            target_code = self._gen_expr(expr.target)
+            value_code = self._gen_expr(expr.value)
+            op = expr.op
+            if op == '//':
+                op = 'FloorDiv'
+            elif op == '**':
+                op = 'Pow'
+            elif op == '/':
+                op = 'TrueDiv'
+            elif op == '%':
+                op = 'Mod'
+            elif op == '+':
+                op = 'Add'
+            elif op == '-':
+                op = 'Sub'
+            elif op == '*':
+                op = 'Mul'
+            
+            return f'{target_code} = Ng{op}(runtime, {target_code}, {value_code})'
         
         elif isinstance(expr, JoinedStrIR):
             return f'NgJoinedStr(runtime, (void*[]) {{' + ', '.join([self._gen_expr(value) for value in expr.parts]) + f'}}, {len(expr.parts)})'
