@@ -2355,9 +2355,93 @@ Object* NgFormattedValue(Runtime* runtime, void* vv, void* ss)
     if (sspec->__flags__.type != OBJ_TYPE_STRING) {
         fprintf(stderr,
             "TypeError: format spec must be a string, not '%s'\n",
-            obj_type_name(sspec)
-        );        exit(1);
+            obj_type_name(sspec));
     }
+    exit(1);
 
     return NgApplyFormat(runtime, value, sspec);
+}
+
+
+
+double NgCastToFloat(Runtime* runtime, void* obj) {
+    Object* o = (Object*)obj;
+
+    if (o->__flags__.type == OBJ_TYPE_FLOAT) {
+        FloatObject* fobj = (FloatObject*)o;
+        return fobj->__value__;
+    } else if (o->__flags__.type == OBJ_TYPE_INT) {
+        IntObject* iobj = (IntObject*)o;
+        return (double)(iobj->__value__);
+    } else if (o->__flags__.type == OBJ_TYPE_INSTANCE) {
+        InstanceObject* inst = (InstanceObject*)o;
+        Object* float_method = NgGetMember(runtime, inst, runtime->builtin_names.__float__);
+        if (float_method && float_method->__flags__.type == OBJ_TYPE_FUNCTION) {
+            Object* result = NgCall(runtime, float_method, alloc_tuple(runtime, 1, (Object* []) {o}), NULL);
+            if (result && result->__flags__.type == OBJ_TYPE_FLOAT) {
+                FloatObject* fobj = (FloatObject*)result;
+                return fobj->__value__;
+            } else {
+                fprintf(stderr,
+                    "TypeError: __float__ method did not return a float (returned '%s')\n",
+                    obj_type_name(result)
+                );
+                exit(1);
+            }
+        }
+        fprintf(stderr,
+            "TypeError: cannot cast type '%s' to float\n",
+            obj_type_name(o)
+        );
+        exit(1);
+    }
+
+    fprintf(stderr,
+        "TypeError: cannot cast type '%s' to float\n",
+        obj_type_name(o)
+    );
+    exit(1);
+
+    return 0.0f;
+}
+
+int64_t NgCastToInt(Runtime* runtime, void* obj) {
+    Object* o = (Object*)obj;
+
+    if (o->__flags__.type == OBJ_TYPE_INT) {
+        IntObject* iobj = (IntObject*)o;
+        return iobj->__value__;
+    } else if (o->__flags__.type == OBJ_TYPE_FLOAT) {
+        FloatObject* fobj = (FloatObject*)o;
+        return (int64_t)(fobj->__value__);
+    } else if (o->__flags__.type == OBJ_TYPE_INSTANCE) {
+        InstanceObject* inst = (InstanceObject*)o;
+        Object* int_method = NgGetMember(runtime, inst, runtime->builtin_names.__int__);
+        if (int_method && int_method->__flags__.type == OBJ_TYPE_FUNCTION) {
+            Object* result = NgCall(runtime, int_method, alloc_tuple(runtime, 1, (Object* []) {o}), NULL);
+            if (result && result->__flags__.type == OBJ_TYPE_INT) {
+                IntObject* iobj = (IntObject*)result;
+                return iobj->__value__;
+            } else {
+                fprintf(stderr,
+                    "TypeError: __int__ method did not return an int (returned '%s')\n",
+                    obj_type_name(result)
+                );
+                exit(1);
+            }
+        }
+        fprintf(stderr,
+            "TypeError: cannot cast type '%s' to int\n",
+            obj_type_name(o)
+        );
+        exit(1);
+    }
+
+    fprintf(stderr,
+        "TypeError: cannot cast type '%s' to int\n",
+        obj_type_name(o)
+    );
+    exit(1);
+
+    return 0;
 }
