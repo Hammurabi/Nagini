@@ -21,7 +21,7 @@ if __name__ == "__main__":
     print(v)
     for i in range(5):
         print(f"i: {i}")
-    # with nexc('cpu', capture=[v]) as optim: # or gpu
-    #     array = optim.array(300, type=float)
-    #     for i in range(100):
-    #         array[i] = 1.0 * 5353 + i * 23.0 * v.x
+    with nexc('cpu') as optim: # or gpu
+        array = optim.array(300, type=optim.fp32)
+        for i in range(100):
+            array[i] = 1.0 * 5353 + i * 23.0 * optim.cast(optim.fp32, v.x)
