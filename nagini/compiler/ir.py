@@ -129,6 +129,14 @@ class AssignIR(StmtIR):
 
 
 @dataclass
+class SubscriptAssignIR(StmtIR):
+    """Subscript assignment statement (obj[index] = value)"""
+    obj: ExprIR
+    index: ExprIR
+    value: ExprIR
+
+
+@dataclass
 class ReturnIR(StmtIR):
     """Return statement"""
     value: Optional[ExprIR]
@@ -162,6 +170,14 @@ class ForIR(StmtIR):
 class ExprStmtIR(StmtIR):
     """Expression statement (e.g., function call)"""
     expr: ExprIR
+
+
+@dataclass
+class WithIR(StmtIR):
+    """With statement (context manager)"""
+    context_expr: ExprIR  # Expression that provides the context manager
+    target: Optional[str]  # Variable name to bind context (as clause)
+    body: List[StmtIR]  # Statements in the with block
 
 
 @dataclass
@@ -406,6 +422,12 @@ class NaginiIR:
                         return AssignIR(tgt, val)
                     elif isinstance(target, ast.Tuple):
                         raise NotImplementedError("Tuple unpacking in assignments is not supported yet.")
+                    elif isinstance(target, ast.Subscript):
+                        # Subscript assignment (e.g., array[i] = value)
+                        obj_ir = self._convert_expr_to_ir(target.value)
+                        index_ir = self._convert_expr_to_ir(target.slice)
+                        value_ir = self._convert_expr_to_ir(stmt.value)
+                        return SubscriptAssignIR(obj_ir, index_ir, value_ir)
                     elif isinstance(target, ast.Attribute):
                         # Attribute assignment (e.g., obj.attr = value)
                         obj_ir = self._convert_expr_to_ir(target.value)
@@ -467,6 +489,21 @@ class NaginiIR:
                 body = [self._convert_stmt_to_ir(s) for s in stmt.body]
                 body = [s for s in body if s]
                 return ForIR(target, iter_expr, body)
+        
+        elif isinstance(stmt, ast.With):
+            # With statement (context manager)
+            if stmt.items:
+                # Get the first context manager (Nagini doesn't support multiple yet)
+                context_item = stmt.items[0]
+                context_expr = self._convert_expr_to_ir(context_item.context_expr)
+                target = None
+                if context_item.optional_vars and isinstance(context_item.optional_vars, ast.Name):
+                    target = context_item.optional_vars.id
+                
+                # Convert body
+                body = [self._convert_stmt_to_ir(s) for s in stmt.body]
+                body = [s for s in body if s]
+                return WithIR(context_expr, target, body)
         
         elif isinstance(stmt, ast.Expr):
             # Expression statement (e.g., function call)

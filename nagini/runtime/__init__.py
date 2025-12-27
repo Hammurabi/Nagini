@@ -3,4 +3,6 @@ Nagini Runtime Support
 Provides runtime functions for memory management, GC, and object handling.
 """
 
-__all__ = []
+from .nexc import nexc
+
+__all__ = ['nexc']
