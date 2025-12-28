@@ -2160,6 +2160,9 @@ int64_t hash(Runtime* runtime, Object* obj) {
 
             return (int64_t)(uintptr_t)obj;
         }
+        case OBJ_TYPE_SET:
+            fprintf(stderr, "TypeError: unhashable type: 'set'\n");
+            exit(1);
         default:
             return (int64_t)(uintptr_t)obj;
     }
