@@ -547,7 +547,7 @@ class LLVMBackend:
                     elif param_type == 'float':
                         self.output_code.append(f'    {c_type} {param_name}_native = NgCastToFloat(runtime, {param_name});')
                     elif param_type == 'bool':
-                        self.output_code.append(f'    {c_type} {param_name}_native = NgCastToBool(runtime, {param_name});')
+                        self.output_code.append(f'    {c_type} {param_name}_native = NgCastToInt(runtime, {param_name}) != 0;')
         
         # Verify hmap_get(self.hmap, symbol_id) against expected types for strict parameters (symbol_id should be of '__typename__' convention)
             
@@ -693,7 +693,7 @@ class LLVMBackend:
                     elif field_type == 'float':
                         result.append(f'{ind}self_native->{field_name} = NgCastToFloat(runtime, {value_code});')
                     elif field_type == 'bool':
-                        result.append(f'{ind}self_native->{field_name} = NgCastToBool(runtime, {value_code});')
+                        result.append(f'{ind}self_native->{field_name} = NgCastToInt(runtime, {value_code}) != 0;')
                     else:
                         result.append(f'{ind}self_native->{field_name} = {value_code};')
                     return result
