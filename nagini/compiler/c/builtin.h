@@ -3865,7 +3865,18 @@ Object* NgSetSymmetricDifference(Runtime* runtime, Tuple* args, Dict* kwargs) {
             }
         }
     }
-    _set_add_all(runtime, result, other);
+    Object* iter = NgIter(runtime, other);
+    if (iter) {
+        Object* next;
+        while ((next = NgIterNext(runtime, iter)) != NULL) {
+            bool in_self = self->table && dict_get(runtime, self->table, next) != NULL;
+            if (!in_self) {
+                dict_set(runtime, result->table, next, (Object*)runtime->builtin_names.none);
+            }
+            DECREF(runtime, next);
+        }
+        DECREF(runtime, iter);
+    }
     return (Object*)result;
 }
 
