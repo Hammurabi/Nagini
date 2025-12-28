@@ -1,6 +1,7 @@
 {
     "files.associations": {
-      "*.nag": "python"
+      "*.nag": "python",
+      "*.ng": "python"
     }
   }
   
