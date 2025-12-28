@@ -3851,6 +3851,8 @@ Object* NgSetSymmetricDifference(Runtime* runtime, Tuple* args, Dict* kwargs) {
     Set* self = (Set*)args->items[0];
     Object* other = args->items[1];
     Set* result = alloc_set_internal(runtime, true);
+    _set_add_all(runtime, result, (Object*)self);
+    _set_add_all(runtime, result, other);
     Dict* table = self->table;
     if (table) {
         for (size_t i = 0; i < table->capacity; i++) {
@@ -3859,22 +3861,10 @@ Object* NgSetSymmetricDifference(Runtime* runtime, Tuple* args, Dict* kwargs) {
             Object* present = NgContains(runtime, other, entry->key);
             int64_t val = present ? NgCastToInt(runtime, present) : 0;
             if (present) DECREF(runtime, present);
-            if (!val) {
-                dict_set(runtime, result->table, entry->key, (Object*)runtime->builtin_names.none);
+            if (val) {
+                dict_del(runtime, result->table, entry->key);
             }
         }
-    }
-    Object* iter = NgIter(runtime, other);
-    if (iter) {
-        Object* next;
-        while ((next = NgIterNext(runtime, iter)) != NULL) {
-            bool in_self = self->table && dict_get(runtime, self->table, next) != NULL;
-            if (!in_self) {
-                dict_set(runtime, result->table, next, (Object*)runtime->builtin_names.none);
-            }
-            DECREF(runtime, next);
-        }
-        DECREF(runtime, iter);
     }
     return (Object*)result;
 }
