@@ -714,7 +714,7 @@ void NgSetMember(Runtime* runtime, void* ii, void* mm, void* vv) {
     Object* value = (Object*)vv;
     Dict* dict = instance->__dict__;
     if (!dict) {
-        dict = alloc_dict_internal(runtime, false);
+        dict = alloc_dict_internal(runtime, /*add_methods=*/false);
         instance->__dict__ = dict;
     }
 
@@ -2204,12 +2204,12 @@ Object* NgContains(Runtime* runtime, void* container, void* item) {
 
 Object* NgNotContains(Runtime* runtime, void* container, void* item) {
     Object* res = NgContains(runtime, container, item);
-    if (res && res->__flags__.type == OBJ_TYPE_INT) {
-        bool b = ((IntObject*)res)->__value__ != 0;
+    int64_t val = 0;
+    if (res) {
+        val = NgCastToInt(runtime, res);
         DECREF(runtime, res);
-        return alloc_bool(runtime, !b);
     }
-    return alloc_bool(runtime, true);
+    return alloc_bool(runtime, val == 0);
 }
 
 Object* NgBuildDict(Runtime* runtime, size_t count, Object** keys, Object** values) {
@@ -2403,7 +2403,9 @@ Object* NgDictCopyMethod(Runtime* runtime, Tuple* args, Dict* kwargs) {
 /* Dict functions */
 static Dict* alloc_dict_internal(Runtime* runtime, bool add_methods) {
     // Internal allocator for Dict. Set add_methods=false when creating hidden
-    // __dict__ objects for instances to avoid recursive method registration.
+    // __dict__ objects for instances to avoid recursive method registration
+    // (NgSetMember would otherwise allocate another __dict__ while adding
+    // method entries).
     Dict* d = (Dict*) dynamic_pool_alloc(runtime->pool->dict);
     if (!d) return NULL;
 
