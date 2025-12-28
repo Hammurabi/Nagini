@@ -734,6 +734,13 @@ class NaginiIR:
             elements = [self._convert_expr_to_ir(e) for e in expr.elts]
             return ListIR(elements)
         
+        elif isinstance(expr, ast.Dict):
+            if any(k is None for k in expr.keys):
+                raise NotImplementedError("Dict unpacking is not supported yet")
+            keys = [self._convert_expr_to_ir(k) for k in expr.keys]
+            values = [self._convert_expr_to_ir(v) for v in expr.values]
+            return DictIR(keys, values)
+        
         # Return a placeholder for unsupported expressions
         # TODO: Add better error handling or warnings for unsupported expression types
         raise NotImplementedError(f"Expression type {type(expr)} not supported in IR conversion.")
@@ -829,6 +836,8 @@ class NaginiIR:
             ast.LtE: '<=',
             ast.Gt: '>',
             ast.GtE: '>=',
+            ast.In: 'in',
+            ast.NotIn: 'not in',
         }
         return op_map.get(type(op), '==')
     

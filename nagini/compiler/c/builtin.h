@@ -26,6 +26,8 @@ typedef enum {
     OBJ_TYPE_DICT      = 8,
     OBJ_TYPE_SET       = 9,
     OBJ_TYPE_FUNCTION  = 10,
+    OBJ_TYPE_VIEW      = 11,
+    OBJ_TYPE_ITER      = 12,
 } ObjectType;
 
 const char* obj_type_names[] = {
@@ -39,7 +41,9 @@ const char* obj_type_names[] = {
     "list",
     "dict",
     "set",
-    "function"
+    "function",
+    "view",
+    "iterator"
 };
 
 typedef enum {
@@ -61,11 +65,30 @@ Object* alloc_list_empty(Runtime* runtime, size_t initial_capacity);
 Object* alloc_instance(Runtime* runtime);
 Object* alloc_object(Runtime* runtime, int32_t typename);
 Dict* alloc_dict(Runtime* runtime);
+static Dict* alloc_dict_internal(Runtime* runtime, bool add_methods);
 Object* alloc_bool(Runtime* runtime, bool value);
 int dict_set(Runtime* runtime, void* dd, void* kk, void* vv);
 Object* dict_get(Runtime* runtime, void* d, void* key);
 bool dict_del(Runtime* runtime, void* d, void* key);
 void dict_destroy(Runtime* runtime, void* d);
+Object* add_dict_functions(Runtime* runtime, Dict* dict);
+Object* NgBuildDict(Runtime* runtime, size_t count, Object** keys, Object** values);
+Object* NgDictFromIterable(Runtime* runtime, void* iterable);
+Object* NgListFromIterable(Runtime* runtime, void* iterable);
+Object* NgIter(Runtime* runtime, void* obj);
+Object* NgIterNext(Runtime* runtime, void* iter);
+Object* NgContains(Runtime* runtime, void* container, void* item);
+Object* NgNotContains(Runtime* runtime, void* container, void* item);
+Object* NgDictKeys(Runtime* runtime, Tuple* args, Dict* kwargs);
+Object* NgDictValues(Runtime* runtime, Tuple* args, Dict* kwargs);
+Object* NgDictItems(Runtime* runtime, Tuple* args, Dict* kwargs);
+Object* NgDictGet(Runtime* runtime, Tuple* args, Dict* kwargs);
+Object* NgDictSetDefault(Runtime* runtime, Tuple* args, Dict* kwargs);
+Object* NgDictPop(Runtime* runtime, Tuple* args, Dict* kwargs);
+Object* NgDictPopItem(Runtime* runtime, Tuple* args, Dict* kwargs);
+Object* NgDictClear(Runtime* runtime, Tuple* args, Dict* kwargs);
+Object* NgDictUpdate(Runtime* runtime, Tuple* args, Dict* kwargs);
+Object* NgDictCopyMethod(Runtime* runtime, Tuple* args, Dict* kwargs);
 Object* DECREF(Runtime* runtime, void* obj);
 void* INCREF(Runtime* runtime, void* obj);
 int64_t hash(Runtime* runtime, Object* obj);
@@ -87,6 +110,7 @@ const char* NgToCString(Runtime* runtime, void* obj);
 Object* NgCall(Runtime* runtime, void* func, void* args, void* kwargs);
 void NgGetTypeName(Runtime* runtime, void* oo, char* buffer, size_t size);
 int64_t NgCastToInt(Runtime* runtime, void* obj);
+Object* alloc_list_prefill(Runtime* runtime, size_t size, Object** items);
 
 #if defined(__linux__) || defined(__unix__)
 void siphash_random_key(uint8_t key[16]) {
@@ -580,6 +604,35 @@ typedef struct Dict {
     int8_t          __padding__[7]; /* Padding for alignment */
 } Dict;
 
+typedef enum {
+    VIEW_KEYS = 0,
+    VIEW_VALUES = 1,
+    VIEW_ITEMS = 2
+} ViewType;
+
+typedef enum {
+    ITER_KIND_LIST = 0,
+    ITER_KIND_TUPLE = 1,
+    ITER_KIND_DICT_KEYS = 2,
+    ITER_KIND_DICT_VALUES = 3,
+    ITER_KIND_DICT_ITEMS = 4,
+    ITER_KIND_VIEW = 5,
+    ITER_KIND_DICT = 6
+} IterKind;
+
+typedef struct ViewObject {
+    Object   base;
+    Dict*    dict;
+    uint8_t  view_type;
+} ViewObject;
+
+typedef struct NgIterator {
+    Object   base;
+    Object*  iterable;
+    uint8_t  iter_kind;
+    size_t   index;
+} NgIterator;
+
 // Helper: Check if two keys are effectively equal
 static inline bool ObjectsEqual(Runtime* runtime, Object* k1, Object* k2) {
     if (!k1 || !k2) return false;
@@ -662,7 +715,7 @@ void NgSetMember(Runtime* runtime, void* ii, void* mm, void* vv) {
     Object* value = (Object*)vv;
     Dict* dict = instance->__dict__;
     if (!dict) {
-        dict = alloc_dict(runtime);
+        dict = alloc_dict_internal(runtime, /*add_methods=*/false);
         instance->__dict__ = dict;
     }
 
@@ -1123,6 +1176,14 @@ typedef struct BuiltinNames {
     StringObject* clear;
     StringObject* index;
     StringObject* extend;
+    StringObject* keys;
+    StringObject* values;
+    StringObject* items;
+    StringObject* get;
+    StringObject* setdefault;
+    StringObject* popitem;
+    StringObject* update;
+    StringObject* copy;
 
     /* -------------------------------------------------------------------------
      * 1. Object Lifecycle & Memory Management
@@ -1363,6 +1424,14 @@ Runtime* init_runtime() {
     runtime->builtin_names.clear  = (StringObject*) alloc_str(runtime, "clear");
     runtime->builtin_names.index  = (StringObject*) alloc_str(runtime, "index");
     runtime->builtin_names.extend = (StringObject*) alloc_str(runtime, "extend");
+    runtime->builtin_names.keys   = (StringObject*) alloc_str(runtime, "keys");
+    runtime->builtin_names.values = (StringObject*) alloc_str(runtime, "values");
+    runtime->builtin_names.items  = (StringObject*) alloc_str(runtime, "items");
+    runtime->builtin_names.get    = (StringObject*) alloc_str(runtime, "get");
+    runtime->builtin_names.setdefault = (StringObject*) alloc_str(runtime, "setdefault");
+    runtime->builtin_names.popitem = (StringObject*) alloc_str(runtime, "popitem");
+    runtime->builtin_names.update = (StringObject*) alloc_str(runtime, "update");
+    runtime->builtin_names.copy = (StringObject*) alloc_str(runtime, "copy");
 
     // -------------------------------------------------------------------------
     // 1. Object Lifecycle & Memory Management
@@ -1587,6 +1656,16 @@ Object* NgLen(Runtime* runtime, Tuple* args, Dict* kwargs) {
             length = str->size;
             break;
         }
+        case OBJ_TYPE_DICT: {
+            Dict* dict = (Dict*)obj;
+            length = dict->count;
+            break;
+        }
+        case OBJ_TYPE_VIEW: {
+            ViewObject* view = (ViewObject*)obj;
+            if (view->dict) length = view->dict->count;
+            break;
+        }
         default: {
             Object* len_method = NgGetMember(runtime, obj, runtime->builtin_names.__len__);
             if (!len_method) {
@@ -1706,6 +1785,38 @@ Object* NgToString(Runtime* runtime, void* obj) {
             // Convert the pointer to string
             char buffer[131072];
             snprintf(buffer, sizeof(buffer), "<Instance at %p>", (void*)o);
+            return alloc_str(runtime, buffer);
+        }
+        case OBJ_TYPE_DICT: {
+            Dict* dict = (Dict*)o;
+            char buffer[262144];
+            memset(buffer, 0, sizeof(buffer));
+            buffer[0] = '{';
+            buffer[1] = '\0';
+            char* quote = "\"";
+            size_t added = 0;
+            for (size_t i = 0; i < dict->capacity; i++) {
+                if (dict->entries[i].key == NULL) continue;
+                Object* key = dict->entries[i].key;
+                Object* value = dict->entries[i].value;
+                const char* key_cstr = NgToCString(runtime, key);
+                const char* value_cstr = NgToCString(runtime, value);
+                bool key_is_str = key && key->__flags__.type == OBJ_TYPE_STRING;
+                bool value_is_str = value && value->__flags__.type == OBJ_TYPE_STRING;
+                if (added > 0) {
+                    strncat(buffer, ", ", sizeof(buffer) - strlen(buffer) - 1);
+                }
+                if (key_is_str) strncat(buffer, quote, sizeof(buffer) - strlen(buffer) - 1);
+                strncat(buffer, key_cstr, sizeof(buffer) - strlen(buffer) - 1);
+                if (key_is_str) strncat(buffer, quote, sizeof(buffer) - strlen(buffer) - 1);
+                strncat(buffer, ": ", sizeof(buffer) - strlen(buffer) - 1);
+                if (value_is_str) strncat(buffer, quote, sizeof(buffer) - strlen(buffer) - 1);
+                strncat(buffer, value_cstr, sizeof(buffer) - strlen(buffer) - 1);
+                if (value_is_str) strncat(buffer, quote, sizeof(buffer) - strlen(buffer) - 1);
+                added++;
+            }
+            buffer[strlen(buffer)] = '}';
+            buffer[strlen(buffer) + 1] = '\0';
             return alloc_str(runtime, buffer);
         }
         default:
@@ -1981,13 +2092,359 @@ int64_t hash(Runtime* runtime, Object* obj) {
     }
 }
 
+static Object* alloc_view(Runtime* runtime, Dict* dict, uint8_t view_type) {
+    bool is_manual;
+    int pool_id;
+    ViewObject* view = (ViewObject*) alloc(runtime, sizeof(ViewObject), &is_manual, &pool_id, true);
+    view->base.__typename__ = get_symbol_id(runtime, "dict_view");
+    view->base.__refcount__ = 1;
+    view->base.__allocation__.is_manual = is_manual ? 1 : 0;
+    view->base.__allocation__.pool_id = pool_id;
+    view->base.__flags__.type = OBJ_TYPE_VIEW;
+    view->dict = (Dict*)INCREF(runtime, dict);
+    view->view_type = view_type;
+    return (Object*)view;
+}
+
+static Object* alloc_iterator(Runtime* runtime, Object* iterable, uint8_t iter_kind) {
+    bool is_manual;
+    int pool_id;
+    NgIterator* it = (NgIterator*) alloc(runtime, sizeof(NgIterator), &is_manual, &pool_id, true);
+    it->base.__typename__ = get_symbol_id(runtime, "iterator");
+    it->base.__refcount__ = 1;
+    it->base.__allocation__.is_manual = is_manual ? 1 : 0;
+    it->base.__allocation__.pool_id = pool_id;
+    it->base.__flags__.type = OBJ_TYPE_ITER;
+    it->iterable = (Object*)INCREF(runtime, iterable);
+    it->iter_kind = iter_kind;
+    it->index = 0;
+    return (Object*)it;
+}
+
+Object* NgIter(Runtime* runtime, void* obj) {
+    Object* o = (Object*)obj;
+    if (!o) return NULL;
+    switch (o->__flags__.type) {
+        case OBJ_TYPE_LIST:
+            return alloc_iterator(runtime, o, ITER_KIND_LIST);
+        case OBJ_TYPE_TUPLE:
+            return alloc_iterator(runtime, o, ITER_KIND_TUPLE);
+        case OBJ_TYPE_DICT:
+            return alloc_iterator(runtime, o, ITER_KIND_DICT_KEYS);
+        case OBJ_TYPE_VIEW: {
+            ViewObject* view = (ViewObject*)o;
+            uint8_t kind = ITER_KIND_DICT_KEYS;
+            if (view->view_type == VIEW_VALUES) kind = ITER_KIND_DICT_VALUES;
+            else if (view->view_type == VIEW_ITEMS) kind = ITER_KIND_DICT_ITEMS;
+            return alloc_iterator(runtime, o, kind);
+        }
+        default:
+            return NULL;
+    }
+}
+
+Object* NgIterNext(Runtime* runtime, void* iter) {
+    NgIterator* it = (NgIterator*)iter;
+    if (!it || !it->iterable) return NULL;
+
+    switch (it->iter_kind) {
+        case ITER_KIND_LIST: {
+            List* list = (List*)it->iterable;
+            if (it->index >= list->size) return NULL;
+            return INCREF(runtime, list->items[it->index++]);
+        }
+        case ITER_KIND_TUPLE: {
+            Tuple* tuple = (Tuple*)it->iterable;
+            if (it->index >= tuple->size) return NULL;
+            return INCREF(runtime, tuple->items[it->index++]);
+        }
+        case ITER_KIND_DICT_KEYS:
+        case ITER_KIND_DICT_VALUES:
+        case ITER_KIND_DICT_ITEMS: {
+            Dict* dict = NULL;
+            if (it->iterable->__flags__.type == OBJ_TYPE_DICT) {
+                dict = (Dict*)it->iterable;
+            } else if (it->iterable->__flags__.type == OBJ_TYPE_VIEW) {
+                dict = ((ViewObject*)it->iterable)->dict;
+            }
+            if (!dict) return NULL;
+            while (it->index < dict->capacity) {
+                dict_entry_t* entry = &dict->entries[it->index++];
+                if (entry->psl == 0) continue;
+                if (it->iter_kind == ITER_KIND_DICT_KEYS) {
+                    return INCREF(runtime, entry->key);
+                } else if (it->iter_kind == ITER_KIND_DICT_VALUES) {
+                    return INCREF(runtime, entry->value);
+                } else {
+                    Object* tup_items[2] = { entry->key, entry->value };
+                    return alloc_tuple(runtime, 2, tup_items);
+                }
+            }
+            return NULL;
+        }
+        default:
+            return NULL;
+    }
+}
+
+Object* NgContains(Runtime* runtime, void* container, void* item) {
+    Object* obj = (Object*)container;
+    if (!obj) return alloc_bool(runtime, false);
+    switch (obj->__flags__.type) {
+        case OBJ_TYPE_LIST: {
+            List* list = (List*)obj;
+            for (size_t i = 0; i < list->size; i++) {
+                if (ObjectsEqual(runtime, list->items[i], (Object*)item) || list->items[i] == item) {
+                    return alloc_bool(runtime, true);
+                }
+            }
+            return alloc_bool(runtime, false);
+        }
+        case OBJ_TYPE_TUPLE: {
+            Tuple* tuple = (Tuple*)obj;
+            for (size_t i = 0; i < tuple->size; i++) {
+                if (ObjectsEqual(runtime, tuple->items[i], (Object*)item) || tuple->items[i] == item) {
+                    return alloc_bool(runtime, true);
+                }
+            }
+            return alloc_bool(runtime, false);
+        }
+        case OBJ_TYPE_DICT: {
+            Object* v = dict_get(runtime, container, item);
+            return alloc_bool(runtime, v != NULL);
+        }
+        case OBJ_TYPE_VIEW: {
+            NgIterator* it = (NgIterator*)NgIter(runtime, obj);
+            Object* result = alloc_bool(runtime, false);
+            if (!it) return result;
+            Object* next;
+            while ((next = NgIterNext(runtime, it)) != NULL) {
+                if (ObjectsEqual(runtime, next, (Object*)item) || next == item) {
+                    DECREF(runtime, result);
+                    result = alloc_bool(runtime, true);
+                    DECREF(runtime, next);
+                    break;
+                }
+                DECREF(runtime, next);
+            }
+            DECREF(runtime, it);
+            return result;
+        }
+        default:
+            return alloc_bool(runtime, false);
+    }
+}
+
+Object* NgNotContains(Runtime* runtime, void* container, void* item) {
+    Object* res = NgContains(runtime, container, item);
+    int64_t val = 0;
+    if (res) {
+        val = NgCastToInt(runtime, res);
+        DECREF(runtime, res);
+    }
+    return alloc_bool(runtime, val == 0);
+}
+
+Object* NgBuildDict(Runtime* runtime, size_t count, Object** keys, Object** values) {
+    Dict* d = alloc_dict(runtime);
+    if (!d) return NULL;
+    for (size_t i = 0; i < count; i++) {
+        dict_set(runtime, d, keys[i], values[i]);
+    }
+    return (Object*)d;
+}
+
+Object* NgListFromIterable(Runtime* runtime, void* iterable) {
+    Object* obj = (Object*)iterable;
+    if (!obj) return alloc_list(runtime);
+    if (obj->__flags__.type == OBJ_TYPE_LIST) {
+        return INCREF(runtime, obj);
+    }
+    if (obj->__flags__.type == OBJ_TYPE_TUPLE) {
+        Tuple* t = (Tuple*)obj;
+        return alloc_list_prefill(runtime, t->size, t->items);
+    }
+    Object* list_obj = alloc_list(runtime);
+    Object* iter_obj = NgIter(runtime, obj);
+    if (!iter_obj) return list_obj;
+    Object* next;
+    while ((next = NgIterNext(runtime, iter_obj)) != NULL) {
+        list_append(runtime, (List*)list_obj, next);
+        DECREF(runtime, next);
+    }
+    DECREF(runtime, iter_obj);
+    return list_obj;
+}
+
+Object* NgDictFromIterable(Runtime* runtime, void* iterable) {
+    Object* obj = (Object*)iterable;
+    if (!obj) return (Object*)alloc_dict(runtime);
+    if (obj->__flags__.type == OBJ_TYPE_DICT) {
+        Dict* src = (Dict*)obj;
+        Dict* dest = alloc_dict(runtime);
+        for (size_t i = 0; i < src->capacity; i++) {
+            if (src->entries[i].psl > 0) {
+                dict_set(runtime, dest, src->entries[i].key, src->entries[i].value);
+            }
+        }
+        return (Object*)dest;
+    }
+    return (Object*)alloc_dict(runtime);
+}
+
+Object* NgDictKeys(Runtime* runtime, Tuple* args, Dict* kwargs) {
+    if (!args || args->size < 1) {
+        fprintf(stderr, "TypeError: keys() missing required positional argument: 'self'\n");
+        exit(1);
+    }
+    Dict* d = (Dict*)args->items[0];
+    return alloc_view(runtime, d, VIEW_KEYS);
+}
+
+Object* NgDictValues(Runtime* runtime, Tuple* args, Dict* kwargs) {
+    if (!args || args->size < 1) {
+        fprintf(stderr, "TypeError: values() missing required positional argument: 'self'\n");
+        exit(1);
+    }
+    Dict* d = (Dict*)args->items[0];
+    return alloc_view(runtime, d, VIEW_VALUES);
+}
+
+Object* NgDictItems(Runtime* runtime, Tuple* args, Dict* kwargs) {
+    if (!args || args->size < 1) {
+        fprintf(stderr, "TypeError: items() missing required positional argument: 'self'\n");
+        exit(1);
+    }
+    Dict* d = (Dict*)args->items[0];
+    return alloc_view(runtime, d, VIEW_ITEMS);
+}
+
+Object* NgDictGet(Runtime* runtime, Tuple* args, Dict* kwargs) {
+    if (!args || args->size < 1) {
+        fprintf(stderr, "TypeError: get() missing required positional argument: 'self'\n");
+        exit(1);
+    }
+    Dict* d = (Dict*)args->items[0];
+    Object* key = args->size > 1 ? args->items[1] : NULL;
+    Object* default_val = args->size > 2 ? args->items[2] : (Object*) runtime->builtin_names.none;
+    Object* found = dict_get(runtime, d, key);
+    if (found) return INCREF(runtime, found);
+    return INCREF(runtime, default_val);
+}
+
+Object* NgDictSetDefault(Runtime* runtime, Tuple* args, Dict* kwargs) {
+    if (!args || args->size < 2) {
+        fprintf(stderr, "TypeError: setdefault() missing required arguments\n");
+        exit(1);
+    }
+    Dict* d = (Dict*)args->items[0];
+    Object* key = args->items[1];
+    Object* default_val = args->size > 2 ? args->items[2] : (Object*) runtime->builtin_names.none;
+    Object* found = dict_get(runtime, d, key);
+    if (found) return INCREF(runtime, found);
+    dict_set(runtime, d, key, default_val);
+    return INCREF(runtime, default_val);
+}
+
+Object* NgDictPop(Runtime* runtime, Tuple* args, Dict* kwargs) {
+    if (!args || args->size < 2) {
+        fprintf(stderr, "TypeError: pop() missing required positional argument\n");
+        exit(1);
+    }
+    Dict* d = (Dict*)args->items[0];
+    Object* key = args->items[1];
+    Object* value = dict_get(runtime, d, key);
+    if (value) {
+        Object* ret = INCREF(runtime, value);
+        dict_del(runtime, d, key);
+        return ret;
+    }
+    if (args->size > 2) {
+        return INCREF(runtime, args->items[2]);
+    }
+    fprintf(stderr, "KeyError: key not found\n");
+    exit(1);
+}
+
+Object* NgDictPopItem(Runtime* runtime, Tuple* args, Dict* kwargs) {
+    if (!args || args->size < 1) {
+        fprintf(stderr, "TypeError: popitem() missing required positional argument\n");
+        exit(1);
+    }
+    Dict* d = (Dict*)args->items[0];
+    for (size_t i = 0; i < d->capacity; i++) {
+        if (d->entries[i].psl > 0) {
+            Object* key = d->entries[i].key;
+            Object* value = d->entries[i].value;
+            Object* tup_items[2] = { key, value };
+            Object* result = alloc_tuple(runtime, 2, tup_items);
+            dict_del(runtime, d, key);
+            return result;
+        }
+    }
+    fprintf(stderr, "KeyError: popitem(): dictionary is empty\n");
+    exit(1);
+}
+
+Object* NgDictClear(Runtime* runtime, Tuple* args, Dict* kwargs) {
+    if (!args || args->size < 1) {
+        fprintf(stderr, "TypeError: clear() missing required positional argument\n");
+        exit(1);
+    }
+    Dict* d = (Dict*)args->items[0];
+    for (size_t i = 0; i < d->capacity; i++) {
+        if (d->entries[i].psl > 0) {
+            DECREF(runtime, d->entries[i].key);
+            DECREF(runtime, d->entries[i].value);
+            d->entries[i].psl = 0;
+            d->entries[i].key = NULL;
+            d->entries[i].value = NULL;
+        }
+    }
+    d->count = 0;
+    return (Object*) runtime->builtin_names.none;
+}
+
+Object* NgDictUpdate(Runtime* runtime, Tuple* args, Dict* kwargs) {
+    if (!args || args->size < 2) {
+        fprintf(stderr, "TypeError: update() missing required positional argument\n");
+        exit(1);
+    }
+    Dict* d = (Dict*)args->items[0];
+    Object* other = args->items[1];
+    if (other->__flags__.type != OBJ_TYPE_DICT) {
+        fprintf(stderr, "TypeError: update() argument must be a dict\n");
+        exit(1);
+    }
+    Dict* od = (Dict*)other;
+    for (size_t i = 0; i < od->capacity; i++) {
+        if (od->entries[i].psl > 0) {
+            dict_set(runtime, d, od->entries[i].key, od->entries[i].value);
+        }
+    }
+    return (Object*) runtime->builtin_names.none;
+}
+
+Object* NgDictCopyMethod(Runtime* runtime, Tuple* args, Dict* kwargs) {
+    if (!args || args->size < 1) {
+        fprintf(stderr, "TypeError: copy() missing required positional argument\n");
+        exit(1);
+    }
+    return NgDictFromIterable(runtime, args->items[0]);
+}
+
 /* Dict functions */
-Dict* alloc_dict(Runtime* runtime) {
+static Dict* alloc_dict_internal(Runtime* runtime, bool add_methods) {
+    // Internal allocator for Dict. Set add_methods=false when creating hidden
+    // __dict__ objects for instances to avoid recursive method registration
+    // (NgSetMember would otherwise allocate another __dict__ while adding
+    // method entries).
     Dict* d = (Dict*) dynamic_pool_alloc(runtime->pool->dict);
     if (!d) return NULL;
 
     d->base.base.__flags__.type = OBJ_TYPE_DICT;
     d->base.base.__refcount__ = 1;
+    d->base.__dict__ = NULL;
     
     d->capacity = DICT_INITIAL_CAPACITY;
     d->count = 0;
@@ -2004,7 +2461,14 @@ Dict* alloc_dict(Runtime* runtime) {
         return NULL;
     }
     
+    if (add_methods) {
+        return (Dict*)add_dict_functions(runtime, d);
+    }
     return d;
+}
+
+Dict* alloc_dict(Runtime* runtime) {
+    return alloc_dict_internal(runtime, true);
 }
 
 
@@ -2453,6 +2917,30 @@ Object* alloc_tuple(Runtime* runtime, size_t size, Object** objects) {
     return (Object*) tuple;
 }
 
+Object* add_dict_functions(Runtime* runtime, Dict* dict) {
+    NgSetMember(runtime, (Object*)dict, runtime->builtin_names.keys, (Object*)alloc_function(
+        runtime, "keys", 0, 1, (void*)NgDictKeys));
+    NgSetMember(runtime, (Object*)dict, runtime->builtin_names.values, (Object*)alloc_function(
+        runtime, "values", 0, 1, (void*)NgDictValues));
+    NgSetMember(runtime, (Object*)dict, runtime->builtin_names.items, (Object*)alloc_function(
+        runtime, "items", 0, 1, (void*)NgDictItems));
+    NgSetMember(runtime, (Object*)dict, runtime->builtin_names.get, (Object*)alloc_function(
+        runtime, "get", 0, 2, (void*)NgDictGet));
+    NgSetMember(runtime, (Object*)dict, runtime->builtin_names.setdefault, (Object*)alloc_function(
+        runtime, "setdefault", 0, 2, (void*)NgDictSetDefault));
+    NgSetMember(runtime, (Object*)dict, runtime->builtin_names.pop, (Object*)alloc_function(
+        runtime, "pop", 0, 2, (void*)NgDictPop));
+    NgSetMember(runtime, (Object*)dict, runtime->builtin_names.popitem, (Object*)alloc_function(
+        runtime, "popitem", 0, 1, (void*)NgDictPopItem));
+    NgSetMember(runtime, (Object*)dict, runtime->builtin_names.clear, (Object*)alloc_function(
+        runtime, "clear", 0, 1, (void*)NgDictClear));
+    NgSetMember(runtime, (Object*)dict, runtime->builtin_names.update, (Object*)alloc_function(
+        runtime, "update", 0, 2, (void*)NgDictUpdate));
+    NgSetMember(runtime, (Object*)dict, runtime->builtin_names.copy, (Object*)alloc_function(
+        runtime, "copy", 0, 1, (void*)NgDictCopyMethod));
+    return (Object*)dict;
+}
+
 
 
 // Object* NgAllocList(Runtime* runtime, Tuple* args, Dict* kwargs) {
@@ -2663,6 +3151,18 @@ Object* DECREF(Runtime* runtime, void* obj) {
                 case OBJ_TYPE_DICT: {
                     Dict* dict = (Dict*)o;
                     dict_destroy(runtime, dict);
+                    break;
+                }
+                case OBJ_TYPE_VIEW: {
+                    ViewObject* view = (ViewObject*)o;
+                    DECREF(runtime, view->dict);
+                    del(runtime, o, is_manual, o->__allocation__.pool_id);
+                    break;
+                }
+                case OBJ_TYPE_ITER: {
+                    NgIterator* it = (NgIterator*)o;
+                    if (it->iterable) DECREF(runtime, it->iterable);
+                    del(runtime, o, is_manual, o->__allocation__.pool_id);
                     break;
                 }
                 case OBJ_TYPE_LIST: {
