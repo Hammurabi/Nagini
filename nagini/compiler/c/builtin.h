@@ -293,6 +293,7 @@ typedef struct Tuple {
 /// LIST
 typedef struct List {
     Object          base;
+    Dict*           __dict__;
     size_t          size;
     size_t          capacity;
     Object**        items;
@@ -2457,6 +2458,7 @@ Object* alloc_list(Runtime* runtime) {
     list->base.__refcount__ = 1;
     list->base.__allocation__.is_manual = 0;
     list->base.__flags__.type = OBJ_TYPE_LIST;
+    list->__dict__ = NULL;
 
     list_init(list, 1);
     return add_list_functions(runtime, list);
@@ -2468,6 +2470,7 @@ Object* alloc_list_empty(Runtime* runtime, size_t capacity) {
     list->base.__refcount__ = 1;
     list->base.__allocation__.is_manual = 0;
     list->base.__flags__.type = OBJ_TYPE_LIST;
+    list->__dict__ = NULL;
 
     list_init(list, capacity);
     for (size_t i = 0; i < capacity; i++) {
@@ -2482,6 +2485,7 @@ Object* alloc_list_prefill(Runtime* runtime, size_t size, Object** items) {
     list->base.__refcount__ = 1;
     list->base.__allocation__.is_manual = 0;
     list->base.__flags__.type = OBJ_TYPE_LIST;
+    list->__dict__ = NULL;
 
     list_init(list, size);
     list->size = size;
