@@ -307,6 +307,10 @@ void list_init(Runtime* runtime, List* list, size_t initial_capacity) {
     list->size = 0;
     list->capacity = (initial_capacity > 0) ? initial_capacity : 4;
     list->items = (Object**) malloc(sizeof(Object*) * list->capacity);
+    if (!list->items) {
+        fprintf(stderr, "MemoryError\n");
+        exit(1);
+    }
 }
 
 /* * Append: Grows the list geometrically (2x) 
@@ -314,10 +318,9 @@ void list_init(Runtime* runtime, List* list, size_t initial_capacity) {
 #define LIST_GROWTH 2
 int list_append(Runtime* runtime, List* list, Object* item) {
     if (list->size >= list->capacity) {
-        size_t old_size = list->capacity;
         size_t new_size = list->capacity * LIST_GROWTH;
         Object** new_items = (Object**)realloc(list->items, new_size * sizeof(Object*));
-        if (!new_items) return -1;
+        if (!new_items) return -1; /* list->items remains valid on failure */
         list->items = new_items;
         list->capacity = new_size;
     }
@@ -2407,6 +2410,7 @@ Object* alloc_tuple(Runtime* runtime, size_t size, Object** objects) {
 // }
 
 Object* add_list_functions(Runtime* runtime, List* list) {
+    /* append(self, item) */
     NgSetMember(runtime, (Object*)list, runtime->builtin_names.append, (Object*)alloc_function(
         runtime,
         "append",
