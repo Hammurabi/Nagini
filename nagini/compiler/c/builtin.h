@@ -57,6 +57,7 @@ Object* alloc_bytes(Runtime* runtime, const char* data, size_t len);
 Object* alloc_function(Runtime* runtime, const char* name, int32_t line, size_t arg_count, void* native_ptr);
 Object* alloc_tuple(Runtime* runtime, size_t size, Object** objects);
 Object* alloc_list(Runtime* runtime);
+Object* alloc_list_empty(Runtime* runtime, size_t initial_capacity);
 Object* alloc_instance(Runtime* runtime);
 Object* alloc_object(Runtime* runtime, int32_t typename);
 Dict* alloc_dict(Runtime* runtime);
@@ -65,7 +66,7 @@ int dict_set(Runtime* runtime, void* dd, void* kk, void* vv);
 Object* dict_get(Runtime* runtime, void* d, void* key);
 bool dict_del(Runtime* runtime, void* d, void* key);
 void dict_destroy(Runtime* runtime, void* d);
-void DECREF(Runtime* runtime, void* obj);
+Object* DECREF(Runtime* runtime, void* obj);
 void* INCREF(Runtime* runtime, void* obj);
 int64_t hash(Runtime* runtime, Object* obj);
 const char* obj_type_name(void* oo);
@@ -304,7 +305,7 @@ typedef struct List {
 void list_init(List* list, size_t initial_capacity) {
     list->size = 0;
     list->capacity = (initial_capacity > 0) ? initial_capacity : 4;
-    list->items = (Object**)malloc(sizeof(Object*) * list->capacity);
+    list->items = (Object**) malloc(sizeof(Object*) * list->capacity);
 }
 
 /* * Append: Grows the list geometrically (2x) 
@@ -323,6 +324,22 @@ int list_append(List* list, Object* item) {
     return 0;
 }
 
+void NgAppend(Runtime* runtime, Tuple* args, Dict* kwargs) {
+    if (!args) {
+        fprintf(stderr, "TypeError: append() missing 2 required positional arguments: 'self' and 'item'\n");
+        exit(1);
+    }
+    if (args->size < 2) {
+        fprintf(stderr, "TypeError: append() missing 2 required positional arguments: 'self' and 'item'\n");
+        exit(1);
+    }
+
+    List* list = (List*)args->items[0];
+    Object* item = args->items[1];
+
+    list_append(list, (Object*)INCREF(runtime, item));
+}
+
 /* * Find: Returns index or -1 
  */
 int64_t list_find(List* list, Object* item) {
@@ -332,6 +349,28 @@ int64_t list_find(List* list, Object* item) {
         }
     }
     return -1;
+}
+
+Object* NgIndex(Runtime* runtime, Tuple* args, Dict* kwargs) {
+    if (!args) {
+        fprintf(stderr, "TypeError: index() missing 2 required positional arguments: 'self' and 'item'\n");
+        exit(1);
+    }
+    if (args->size < 2) {
+        fprintf(stderr, "TypeError: index() missing 2 required positional arguments: 'self' and 'item'\n");
+        exit(1);
+    }
+
+    List* list = (List*)args->items[0];
+    Object* item = args->items[1];
+
+    int64_t index = list_find(list, item);
+    if (index == -1) {
+        fprintf(stderr, "ValueError: list.index(): item not found in list\n");
+        exit(1);
+    }
+
+    return alloc_int(runtime, index);
 }
 
 /* * Remove: Shifts items to maintain order
@@ -349,6 +388,31 @@ Object* list_remove(List* list, size_t index) {
 
     list->size--;
     return removed_item;
+}
+
+void NgRemove(Runtime* runtime, Tuple* args, Dict* kwargs) {
+    if (!args) {
+        fprintf(stderr, "TypeError: remove() missing 2 required positional arguments: 'self' and 'item'\n");
+        exit(1);
+    }
+    if (args->size < 2) {
+        fprintf(stderr, "TypeError: remove() missing 2 required positional arguments: 'self' and 'item'\n");
+        exit(1);
+    }
+
+    List* list = (List*)args->items[0];
+    Object* item = args->items[1];
+
+    int64_t index = list_find(list, item);
+    if (index == -1) {
+        fprintf(stderr, "ValueError: list.remove(): item not found in list\n");
+        exit(1);
+    }
+
+    Object* removed_item = list_remove(list, (size_t)index);
+    if (removed_item) {
+        DECREF(runtime, removed_item);
+    }
 }
 
 /* * Add (Concatenate): Efficiently joins two lists
@@ -372,6 +436,88 @@ int list_add(List* list, List* other) {
     list->size += other->size;
     
     return 0;
+}
+
+void NgExtend(Runtime* runtime, Tuple* args, Dict* kwargs) {
+    if (!args) {
+        fprintf(stderr, "TypeError: extend() missing 2 required positional arguments: 'self' and 'other'\n");
+        exit(1);
+    }
+    if (args->size < 2) {
+        fprintf(stderr, "TypeError: extend() missing 2 required positional arguments: 'self' and 'other'\n");
+        exit(1);
+    }
+
+    List* list = (List*)args->items[0];
+    List* other = (List*)args->items[1];
+    List* newl = (List*)alloc_list_empty(runtime, list->size + other->size);
+    for (size_t i = 0; i < list->size; i++) {
+        list_append(newl, (Object*)INCREF(runtime, list->items[i]));
+    }
+
+    if (list_add(newl, other) != 0) {
+        fprintf(stderr, "MemoryError: failed to extend list due to memory allocation failure\n");
+        exit(1);
+    }
+}
+
+/*
+    Pop does not DECREF the removed item, it returns it to the caller which is responsible for managing its reference count.
+*/
+Object* NgPop(Runtime* runtime, Tuple* args, Dict* kwargs) {
+    if (!args) {
+        fprintf(stderr, "TypeError: pop() missing 1 required positional argument: 'self'\n");
+        exit(1);
+    }
+    if (args->size < 1) {
+        fprintf(stderr, "TypeError: pop() missing 1 required positional argument: 'self'\n");
+        exit(1);
+    }
+
+    size_t argc = args->size;
+    List* list = (List*)args->items[0];
+    if (argc == 2) {
+        int64_t idx = NgCastToInt(runtime, args->items[1]);
+        if (idx < 0) {
+            fprintf(stderr, "IndexError: pop index cannot be negative\n");
+            exit(1);
+        } else if ((size_t)idx >= list->size) {
+            fprintf(stderr, "IndexError: pop index out of range\n");
+            exit(1);
+        }
+
+        Object* item = list_remove(list, (size_t)idx);
+        return item;
+    } else if (argc == 1) {
+        if (list->size == 0) {
+            fprintf(stderr, "IndexError: pop from empty list\n");
+            exit(1);
+        }
+
+        Object* item = list->items[list->size - 1];
+        list->size--;
+        return item;
+    } else {
+        fprintf(stderr, "TypeError: pop() takes at most 2 positional arguments (%zu given)\n", argc);
+        exit(1);
+    }
+}
+
+void NgClearList(Runtime* runtime, Tuple* args, Dict* kwargs) {
+    if (!args) {
+        fprintf(stderr, "TypeError: clear() missing 1 required positional argument: 'self'\n");
+        exit(1);
+    }
+    if (args->size < 1) {
+        fprintf(stderr, "TypeError: clear() missing 1 required positional argument: 'self'\n");
+        exit(1);
+    }
+
+    List* list = (List*)args->items[0];
+    for (size_t i = 0; i < list->size; i++) {
+        DECREF(runtime, list->items[i]);
+    }
+    list->size = 0;
 }
 
 
@@ -943,6 +1089,12 @@ typedef struct BuiltinNames {
     StringObject* none;
     StringObject* __typename__;
 
+    StringObject* append;
+    StringObject* pop;
+    StringObject* remove;
+    StringObject* clear;
+    StringObject* index;
+
     /* -------------------------------------------------------------------------
      * 1. Object Lifecycle & Memory Management
      * ------------------------------------------------------------------------- */
@@ -1176,6 +1328,12 @@ Runtime* init_runtime() {
     runtime->builtin_names.none  = (StringObject*) alloc_str(runtime, "None");
     runtime->builtin_names.__typename__ = (StringObject*) alloc_str(runtime, "__typename__");
 
+    runtime->builtin_names.append = (StringObject*) alloc_str(runtime, "append");
+    runtime->builtin_names.pop    = (StringObject*) alloc_str(runtime, "pop");
+    runtime->builtin_names.remove = (StringObject*) alloc_str(runtime, "remove");
+    runtime->builtin_names.clear  = (StringObject*) alloc_str(runtime, "clear");
+    runtime->builtin_names.index  = (StringObject*) alloc_str(runtime, "index");
+
     // -------------------------------------------------------------------------
     // 1. Object Lifecycle & Memory Management
     // -------------------------------------------------------------------------
@@ -1395,6 +1553,50 @@ Object* NgToString(Runtime* runtime, void* obj) {
                 obj_type_name(o)
             );
             exit(1);
+        }
+        case OBJ_TYPE_TUPLE: {
+            Tuple* tuple = (Tuple*)o;
+            char buffer[262144];
+            buffer[0] = '(';
+            buffer[1] = '\0';
+            char* quote = "\"";
+            for (size_t i = 0; i < tuple->size; i++) {
+                Object* item = tuple->items[i];
+                const char* item_cstr = NgToCString(runtime, item);
+                size_t len = strlen(item_cstr);
+                bool is_str = item && item->__flags__.type == OBJ_TYPE_STRING;
+                if (i > 0) {
+                    strncat(buffer, ", ", sizeof(buffer) - strlen(buffer) - 1);
+                }
+                if (is_str) strncat(buffer, quote, sizeof(buffer) - strlen(buffer) - 1);
+                strncat(buffer, item_cstr, sizeof(buffer) - strlen(buffer) - 1);
+                if (is_str) strncat(buffer, quote, sizeof(buffer) - strlen(buffer) - 1);
+            }
+            buffer[strlen(buffer)] = ')';
+            buffer[strlen(buffer) + 1] = '\0';
+            return alloc_str(runtime, buffer);
+        }
+        case OBJ_TYPE_LIST: {
+            List* list = (List*)o;
+            char buffer[262144];
+            buffer[0] = '[';
+            buffer[1] = '\0';
+            char* quote = "\"";
+            for (size_t i = 0; i < list->size; i++) {
+                Object* item = list->items[i];
+                const char* item_cstr = NgToCString(runtime, item);
+                size_t len = strlen(item_cstr);
+                bool is_str = item && item->__flags__.type == OBJ_TYPE_STRING;
+                if (i > 0) {
+                    strncat(buffer, ", ", sizeof(buffer) - strlen(buffer) - 1);
+                }
+                if (is_str) strncat(buffer, quote, sizeof(buffer) - strlen(buffer) - 1);
+                strncat(buffer, item_cstr, sizeof(buffer) - strlen(buffer) - 1);
+                if (is_str) strncat(buffer, quote, sizeof(buffer) - strlen(buffer) - 1);
+            }
+            buffer[strlen(buffer)] = ']';
+            buffer[strlen(buffer) + 1] = '\0';
+            return alloc_str(runtime, buffer);
         }
         case OBJ_TYPE_INSTANCE: {
             InstanceObject* instance = (InstanceObject*)o;
@@ -2173,6 +2375,82 @@ Object* alloc_tuple(Runtime* runtime, size_t size, Object** objects) {
     return (Object*) tuple;
 }
 
+
+
+// Object* NgAllocList(Runtime* runtime, Tuple* args, Dict* kwargs) {
+//     if (!args) {
+//         fprintf(stderr, "TypeError: list() missing 0 required positional arguments\n");
+//         exit(1);
+//     }
+
+//     if (args->size == 0) {
+//         return alloc_list(runtime);
+//     } else if (args->size == 1) {
+//         Object* first_arg = args->items[0];
+//         if (first_arg->__flags__.type == OBJ_TYPE_LIST) {
+//             List* other = (List*)first_arg;
+//             List* newl = (List*)alloc_list_empty(runtime, other->size);
+//             for (size_t i = 0; i < other->size; i++) {
+//                 list_append(newl, (Object*)INCREF(runtime, other->items[i]));
+//             }
+//             return (Object*)newl;
+//         } else {
+//             fprintf(stderr, "TypeError: list() argument must be a list\n");
+//             exit(1);
+//         }
+//     } else {
+//         fprintf(stderr, "TypeError: list() takes at most 1 argument (%zu given)\n", args->size);
+//         exit(1);
+//     }
+// }
+
+Object* add_list_functions(Runtime* runtime, List* list) {
+    NgSetMember(runtime, (Object*)list, runtime->builtin_names.append, (Object*)alloc_function(
+        runtime,
+        "append",
+        0,
+        1,
+        (void*)list_append
+    ));
+    NgSetMember(runtime, (Object*)list, runtime->builtin_names.pop, (Object*)alloc_function(
+        runtime,
+        "pop",
+        0,
+        0,
+        (void*)NgPop
+    ));
+    // NgSetMember(runtime, (Object*)list, runtime->builtin_names.insert, (Object*)alloc_function(
+    //     runtime,
+    //     "insert",
+    //     2,
+    //     2,
+    //     (void*)list_insert
+    // ));
+    NgSetMember(runtime, (Object*)list, runtime->builtin_names.remove, (Object*)alloc_function(
+        runtime,
+        "remove",
+        1,
+        1,
+        (void*)NgRemove
+    ));
+    NgSetMember(runtime, (Object*)list, runtime->builtin_names.clear, (Object*)alloc_function(
+        runtime,
+        "clear",
+        0,
+        0,
+        (void*)NgClearList
+    ));
+    NgSetMember(runtime, (Object*)list, runtime->builtin_names.index, (Object*)alloc_function(
+        runtime,
+        "index",
+        1,
+        1,
+        (void*)NgIndex
+    ));
+
+    return list;
+}
+
 Object* alloc_list(Runtime* runtime) {
     List* list = (List*) dynamic_pool_alloc(runtime->pool->list);
     list->base.__typename__ = get_symbol_id(runtime, "list");
@@ -2181,7 +2459,38 @@ Object* alloc_list(Runtime* runtime) {
     list->base.__flags__.type = OBJ_TYPE_LIST;
 
     list_init(list, 1);
-    return (Object*)list;
+    return add_list_functions(runtime, list);
+}
+
+Object* alloc_list_empty(Runtime* runtime, size_t capacity) {
+    List* list = (List*) dynamic_pool_alloc(runtime->pool->list);
+    list->base.__typename__ = get_symbol_id(runtime, "list");
+    list->base.__refcount__ = 1;
+    list->base.__allocation__.is_manual = 0;
+    list->base.__flags__.type = OBJ_TYPE_LIST;
+
+    list_init(list, capacity);
+    for (size_t i = 0; i < capacity; i++) {
+        list->items[i] = NULL;
+    }
+    return add_list_functions(runtime, list);
+}
+
+Object* alloc_list_prefill(Runtime* runtime, size_t size, Object** items) {
+    List* list = (List*) dynamic_pool_alloc(runtime->pool->list);
+    list->base.__typename__ = get_symbol_id(runtime, "list");
+    list->base.__refcount__ = 1;
+    list->base.__allocation__.is_manual = 0;
+    list->base.__flags__.type = OBJ_TYPE_LIST;
+
+    list_init(list, size);
+    list->size = size;
+    
+    for (size_t i = 0; i < size; i++) {
+        list->items[i] = items[i];
+        INCREF(runtime, items[i]);
+    }
+    return add_list_functions(runtime, list);
 }
 
 const char* obj_type_name(void* oo) {
@@ -2203,7 +2512,7 @@ void* INCREF(Runtime* runtime, void* obj) {
 }
 
 /* Decrement reference count and free if zero */
-void DECREF(Runtime* runtime, void* obj) {
+Object* DECREF(Runtime* runtime, void* obj) {
     if (obj != NULL) {
         Object* o = (Object*)obj;
         o->__refcount__--;
@@ -2317,7 +2626,9 @@ void DECREF(Runtime* runtime, void* obj) {
                     }
                     break;
             }
+            return NULL;
         }
+        return o;
     }
 }
 

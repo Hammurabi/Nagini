@@ -94,6 +94,17 @@ class TupleIR(ExprIR):
     elements: List[ExprIR]
 
 @dataclass
+class ListIR(ExprIR):
+    """List literal"""
+    elements: List[ExprIR]
+
+@dataclass
+class DictIR(ExprIR):
+    """Dictionary literal"""
+    keys: List[ExprIR]
+    values: List[ExprIR]
+
+@dataclass
 class JoinedStrIR(ExprIR):
     """Joined string (f-string)"""
     parts: List[ExprIR]
@@ -717,6 +728,11 @@ class NaginiIR:
                 format_spec_ir = self._convert_expr_to_ir(expr.format_spec) if expr.format_spec else None
 
             return FormattedValueIR(value_ir, format_spec_ir)
+        
+        elif isinstance(expr, ast.List):
+            # List literal
+            elements = [self._convert_expr_to_ir(e) for e in expr.elts]
+            return ListIR(elements)
         
         # Return a placeholder for unsupported expressions
         # TODO: Add better error handling or warnings for unsupported expression types

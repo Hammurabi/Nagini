@@ -16,7 +16,7 @@ from .ir import (
     AssignIR, SubscriptAssignIR, ReturnIR, IfIR, WhileIR, ForIR, ExprStmtIR, WithIR,
     ConstructorCallIR, LambdaIR, BoxIR, UnboxIR, SubscriptIR,
     SetAttrIR, JoinedStrIR, FormattedValueIR, AugAssignIR, MultiAssignIR, SliceIR,
-    TupleIR
+    TupleIR, ListIR, DictIR
 )
 
 fun_ids = {}
@@ -1035,6 +1035,12 @@ class LLVMBackend:
             if elements_code:
                 return f'alloc_tuple(runtime, {len(elements_code)}, (Object*[]) {{{", ".join(elements_code)}}})'
             return 'alloc_tuple(runtime, 0, NULL)'
+        
+        elif isinstance(expr, ListIR):
+            elements_code = [self._gen_expr(e) for e in expr.elements]
+            if elements_code:
+                return f'alloc_list_prefill(runtime, {len(elements_code)}, (Object*[]) {{{", ".join(elements_code)}}})'
+            return 'alloc_list(runtime)'
         
         elif isinstance(expr, BinOpIR):
             # Binary operation

@@ -19,16 +19,18 @@ def fibonacci(n: int):
     a, b = 0, 1
     for _ in range(n):
         print(f'ib step: a={a}, b={b}')
-        temp = a      # save old a
-        a = b         # update a to previous b
-        b = temp + b  # update b to old a + old b
+        a, b = b, a + b
     return a
 
 if __name__ == "__main__":
+    print("hello fib!")
     print(fibonacci(10))
+    print("hello vec3!")
     v = Vec3(1.0, 2.0, 3.0)
+    print('hello member methods:')
     print(v.magnitude())
     print(v)
+    print('hello loops:')
     total = 0
     for i in range(5):
         total += 5
@@ -37,6 +39,15 @@ if __name__ == "__main__":
     while i < 3:
         print(i)
         i = i + 1
+    print('hello tuples:')
+    x = (10, 2, 'text')
+    print(x)
+    print(x[2])
+    print('hello list:')
+    lst = [1, 2, 3, 4]
+    print(lst)
+    lst.append(5)
+    print(lst)
     # with nexc('cpu') as optim: # or gpu
     #     array = optim.array(300, type=optim.fp32)
     #     for i in range(100):
