@@ -1587,6 +1587,7 @@ Object* NgToString(Runtime* runtime, void* obj) {
         case OBJ_TYPE_TUPLE: {
             Tuple* tuple = (Tuple*)o;
             char buffer[262144];
+            memset(buffer, 0, sizeof(buffer));
             buffer[0] = '(';
             buffer[1] = '\0';
             char* quote = "\"";
@@ -1609,6 +1610,7 @@ Object* NgToString(Runtime* runtime, void* obj) {
         case OBJ_TYPE_LIST: {
             List* list = (List*)o;
             char buffer[262144];
+            memset(buffer, 0, sizeof(buffer));
             buffer[0] = '[';
             buffer[1] = '\0';
             char* quote = "\"";
