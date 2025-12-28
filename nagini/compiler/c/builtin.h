@@ -306,7 +306,10 @@ typedef struct List {
 void list_init(Runtime* runtime, List* list, size_t initial_capacity) {
     list->size = 0;
     list->capacity = (initial_capacity > 0) ? initial_capacity : 4;
-    list->items = (Object**) malloc(sizeof(Object*) * list->capacity);
+    bool is_manual;
+    int pool_id;
+    list->items = (Object**) alloc(runtime, sizeof(Object*) * list->capacity, &is_manual, &pool_id, true);
+    // (Object**) malloc(sizeof(Object*) * list->capacity);
     if (!list->items) {
         fprintf(stderr, "MemoryError\n");
         exit(1);
@@ -319,8 +322,16 @@ void list_init(Runtime* runtime, List* list, size_t initial_capacity) {
 int list_append(Runtime* runtime, List* list, Object* item) {
     if (list->size >= list->capacity) {
         size_t new_size = list->capacity * LIST_GROWTH;
-        Object** new_items = (Object**)realloc(list->items, new_size * sizeof(Object*));
+        bool is_manual;
+        int pool_id;
+        Object** new_items = (Object**) alloc(runtime, sizeof(Object*) * new_size, &is_manual, &pool_id, false);
+        
+        // (Object**)realloc(list->items, new_size * sizeof(Object*));
         if (!new_items) return -1; /* list->items remains valid on failure */
+        memcpy(new_items, list->items, sizeof(Object*) * list->capacity);
+        del(runtime, list->items, list->base.__allocation__.is_manual, list->base.__allocation__.pool_id);
+        list->base.__allocation__.is_manual = is_manual;
+        list->base.__allocation__.pool_id = pool_id;
         list->items = new_items;
         list->capacity = new_size;
     }
@@ -422,16 +433,32 @@ void NgRemove(Runtime* runtime, Tuple* args, Dict* kwargs) {
 
 /* * Add (Concatenate): Efficiently joins two lists
  */
-int list_add(List* list, List* other) {
+int list_add(Runtime* runtime, List* list, List* other) {
     size_t total_needed = list->size + other->size;
 
     if (total_needed > list->capacity) {
         size_t new_capacity = list->capacity;
         while (new_capacity < total_needed) new_capacity *= 2;
 
-        Object** new_items = (Object**)realloc(list->items, sizeof(Object*) * new_capacity);
-        if (!new_items) return -1;
+        // Object** new_items = (Object**)realloc(list->items, sizeof(Object*) * new_capacity);
+        // if (!new_items) return -1;
 
+        // list->items = new_items;
+        // list->capacity = new_capacity;
+        bool is_manual;
+        int pool_id;
+        Object** new_items = (Object**) alloc(runtime, sizeof(Object*) * new_capacity, &is_manual, &pool_id, false);
+        
+        // (Object**)realloc(list->items, new_size * sizeof(Object*));
+        if (!new_items) {
+            fprintf(stderr, "MemoryError: failed to extend list due to memory allocation failure\n");
+            exit(1);
+        }
+
+        memcpy(new_items, list->items, sizeof(Object*) * list->capacity);
+        del(runtime, list->items, list->base.__allocation__.is_manual, list->base.__allocation__.pool_id);
+        list->base.__allocation__.is_manual = is_manual;
+        list->base.__allocation__.pool_id = pool_id;
         list->items = new_items;
         list->capacity = new_capacity;
     }
@@ -455,12 +482,8 @@ void NgExtend(Runtime* runtime, Tuple* args, Dict* kwargs) {
 
     List* list = (List*)args->items[0];
     List* other = (List*)args->items[1];
-    List* newl = (List*)alloc_list_empty(runtime, list->size + other->size);
-    for (size_t i = 0; i < list->size; i++) {
-        list_append(runtime, newl, (Object*)INCREF(runtime, list->items[i]));
-    }
 
-    if (list_add(newl, other) != 0) {
+    if (list_add(runtime, list, other) != 0) {
         fprintf(stderr, "MemoryError: failed to extend list due to memory allocation failure\n");
         exit(1);
     }
@@ -1099,6 +1122,7 @@ typedef struct BuiltinNames {
     StringObject* remove;
     StringObject* clear;
     StringObject* index;
+    StringObject* extend;
 
     /* -------------------------------------------------------------------------
      * 1. Object Lifecycle & Memory Management
@@ -1338,6 +1362,7 @@ Runtime* init_runtime() {
     runtime->builtin_names.remove = (StringObject*) alloc_str(runtime, "remove");
     runtime->builtin_names.clear  = (StringObject*) alloc_str(runtime, "clear");
     runtime->builtin_names.index  = (StringObject*) alloc_str(runtime, "index");
+    runtime->builtin_names.extend = (StringObject*) alloc_str(runtime, "extend");
 
     // -------------------------------------------------------------------------
     // 1. Object Lifecycle & Memory Management
@@ -2452,6 +2477,13 @@ Object* add_list_functions(Runtime* runtime, List* list) {
         1,
         1,
         (void*)NgIndex
+    ));
+    NgSetMember(runtime, (Object*)list, runtime->builtin_names.extend, (Object*)alloc_function(
+        runtime,
+        "extend",
+        1,
+        1,
+        (void*)NgExtend
     ));
 
     return list;

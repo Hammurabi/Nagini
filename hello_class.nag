@@ -48,6 +48,17 @@ if __name__ == "__main__":
     print(lst)
     lst.append(5)
     print(lst)
+    lst2 = [7, 2]
+    lst.extend(lst2)
+    print(lst)
+    print(f'list find 3: {lst.index(3)}')
+    print(f'list erase 2:')
+    lst.remove(2)
+    print(lst)
+    print(f'list find 7: {lst.index(7)}')
+    print(f'list pop(4): {lst.pop(4)}')
+    print(lst)
+    print(f'list pop(): {lst.pop()}')
     # with nexc('cpu') as optim: # or gpu
     #     array = optim.array(300, type=optim.fp32)
     #     for i in range(100):
