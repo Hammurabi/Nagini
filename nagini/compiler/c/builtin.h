@@ -3630,31 +3630,31 @@ Object* add_set_functions(Runtime* runtime, Set* set) {
     NgSetMember(runtime, (Object*)set, runtime->builtin_names.add, (Object*)alloc_function(
         runtime, "add", 0, 2, (void*)NgSetAdd));
     NgSetMember(runtime, (Object*)set, runtime->builtin_names.discard, (Object*)alloc_function(
-        runtime, "discard", 0, 1, (void*)NgSetDiscard));
+        runtime, "discard", 0, 2, (void*)NgSetDiscard));
     NgSetMember(runtime, (Object*)set, runtime->builtin_names.remove, (Object*)alloc_function(
-        runtime, "remove", 0, 1, (void*)NgSetRemove));
+        runtime, "remove", 0, 2, (void*)NgSetRemove));
     NgSetMember(runtime, (Object*)set, runtime->builtin_names.pop, (Object*)alloc_function(
-        runtime, "pop", 0, 0, (void*)NgSetPop));
+        runtime, "pop", 0, 1, (void*)NgSetPop));
     NgSetMember(runtime, (Object*)set, runtime->builtin_names.clear, (Object*)alloc_function(
-        runtime, "clear", 0, 0, (void*)NgSetClear));
+        runtime, "clear", 0, 1, (void*)NgSetClear));
     NgSetMember(runtime, (Object*)set, runtime->builtin_names.set_union, (Object*)alloc_function(
-        runtime, "union", 0, 1, (void*)NgSetUnion));
+        runtime, "union", 0, 2, (void*)NgSetUnion));
     NgSetMember(runtime, (Object*)set, runtime->builtin_names.intersection, (Object*)alloc_function(
-        runtime, "intersection", 0, 1, (void*)NgSetIntersection));
+        runtime, "intersection", 0, 2, (void*)NgSetIntersection));
     NgSetMember(runtime, (Object*)set, runtime->builtin_names.difference, (Object*)alloc_function(
-        runtime, "difference", 0, 1, (void*)NgSetDifference));
+        runtime, "difference", 0, 2, (void*)NgSetDifference));
     NgSetMember(runtime, (Object*)set, runtime->builtin_names.symmetric_difference, (Object*)alloc_function(
-        runtime, "symmetric_difference", 0, 1, (void*)NgSetSymmetricDifference));
+        runtime, "symmetric_difference", 0, 2, (void*)NgSetSymmetricDifference));
     NgSetMember(runtime, (Object*)set, runtime->builtin_names.update, (Object*)alloc_function(
-        runtime, "update", 0, 1, (void*)NgSetUpdate));
+        runtime, "update", 0, 2, (void*)NgSetUpdate));
     NgSetMember(runtime, (Object*)set, runtime->builtin_names.copy, (Object*)alloc_function(
-        runtime, "copy", 0, 0, (void*)NgSetCopy));
+        runtime, "copy", 0, 1, (void*)NgSetCopy));
     NgSetMember(runtime, (Object*)set, runtime->builtin_names.isdisjoint, (Object*)alloc_function(
-        runtime, "isdisjoint", 0, 1, (void*)NgSetIsDisjoint));
+        runtime, "isdisjoint", 0, 2, (void*)NgSetIsDisjoint));
     NgSetMember(runtime, (Object*)set, runtime->builtin_names.issubset, (Object*)alloc_function(
-        runtime, "issubset", 0, 1, (void*)NgSetIsSubset));
+        runtime, "issubset", 0, 2, (void*)NgSetIsSubset));
     NgSetMember(runtime, (Object*)set, runtime->builtin_names.issuperset, (Object*)alloc_function(
-        runtime, "issuperset", 0, 1, (void*)NgSetIsSuperset));
+        runtime, "issuperset", 0, 2, (void*)NgSetIsSuperset));
     return (Object*)set;
 }
 
