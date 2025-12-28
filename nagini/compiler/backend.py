@@ -66,6 +66,8 @@ class LLVMBackend:
         self.main_function: Optional[FunctionIR] = None
         self._zero_const_id: Optional[int] = None
         self._one_const_id: Optional[int] = None
+        self.current_class_info: Optional[ClassInfo] = None  # Track current class for native field access
+        self.current_method_paradigm: str = 'object'  # Track paradigm for current method
         
     def generate(self) -> str:
         """
@@ -100,10 +102,15 @@ class LLVMBackend:
         
         # Generate class structs and their methods
         for class_name, class_info in self.ir.classes.items():
+            # For native paradigm, generate struct first (methods need the type)
+            if class_info.paradigm == 'native':
+                self._gen_class_struct(class_info)
             # Generate methods for this class
             for method in class_info.methods:
                 self._gen_class_method(class_info, method)
-            self._gen_class_struct(class_info)
+            # For object paradigm, generate struct after methods
+            if class_info.paradigm != 'native':
+                self._gen_class_struct(class_info)
         
         # Generate functions
         for func in self.ir.functions:
@@ -356,6 +363,34 @@ class LLVMBackend:
                     self.output_code.append(f'    }}')
             self.output_code.append(f'    return cls;')
             self.output_code.append(f'}}')
+        elif class_info.paradigm == 'native':
+            # Native paradigm: struct with InstanceObject header for interoperability
+            # but with direct field access (no hash table)
+            self.output_code.append(f'typedef struct {{')
+            self.output_code.append('    /* InstanceObject header for interoperability */')
+            self.output_code.append('    InstanceObject base;  /* Base InstanceObject with dict and refcount */')
+            
+            # Add fields directly (no hash table, direct native access)
+            if class_info.fields:
+                self.output_code.append('    /* Native fields (direct access) */')
+                for field in class_info.fields:
+                    c_type = self._map_type_to_c(field.type_name)
+                    self.output_code.append(f'    {c_type} {field.name};')
+            
+            self.output_code.append(f'}} {class_info.name};')
+            self.output_code.append('')
+            
+            # Forward declare methods for native class (needed by allocator)
+            for method in class_info.methods:
+                method_name = f'{class_info.name}_{method.name}'
+                self.output_code.append(f'Object* {method_name}(Runtime* runtime, Tuple* args, Dict* kwargs);')
+            self.output_code.append('')
+            
+            # Generate allocator function for native class
+            self._gen_native_class_allocator(class_info)
+            
+            # Generate class definition function
+            self._gen_native_class_def(class_info)
         else:
             # Data paradigm uses direct struct (no hash table, no refcount)
             self.output_code.append(f'typedef struct {{')
@@ -370,6 +405,75 @@ class LLVMBackend:
             self.output_code.append(f'}} {class_info.name};')
             self.output_code.append('')
     
+    def _gen_native_class_allocator(self, class_info: ClassInfo):
+        """Generate allocator function for native paradigm class"""
+        self.output_code.append(f'Object* NgAlloc{class_info.name}(Runtime* runtime, Tuple* args, Dict* kwargs) {{')
+        self.output_code.append(f'    /* Allocate native instance of {class_info.name} */')
+        self.output_code.append(f'    {class_info.name}* instance = ({class_info.name}*)malloc(sizeof({class_info.name}));')
+        self.output_code.append(f'    if (!instance) {{')
+        self.output_code.append(f'        fprintf(stderr, "Runtime Error: Failed to allocate memory for {class_info.name}\\n");')
+        self.output_code.append(f'        exit(1);')
+        self.output_code.append(f'    }}')
+        self.output_code.append(f'    /* Initialize InstanceObject header */')
+        self.output_code.append(f'    instance->base.base.__refcount__ = 1;')
+        self.output_code.append(f'    instance->base.base.__typename__ = runtime->constants[{class_info.name_id}];')
+        self.output_code.append(f'    instance->base.__dict__ = alloc_dict(runtime);')
+        self.output_code.append(f'    /* Call __init__ if provided */')
+        
+        # Find __init__ method to call
+        init_method = None
+        for method in class_info.methods:
+            if method.name == '__init__':
+                init_method = method
+                break
+        
+        if init_method:
+            self.output_code.append(f'    /* Prepend instance to args for __init__ call */')
+            self.output_code.append(f'    args = (Tuple*) NgPrependTuple(runtime, (Object*)instance, args);')
+            self.output_code.append(f'    {class_info.name}___init__(runtime, args, kwargs);')
+        
+        self.output_code.append(f'    /* Set class */')
+        self.output_code.append(f'    dict_set(runtime, instance->base.__dict__, runtime->builtin_names.__class__, runtime->constants[{self.ir.register_class_constant(class_info)}]);')
+        
+        # Add methods to instance
+        for method in class_info.methods:
+            if method.name == '__init__' or method.is_static:
+                continue
+            self.output_code.append(f'    /* Initialize method: {method.name} */')
+            self.output_code.append(f'    dict_set(runtime, instance->base.__dict__, runtime->constants[{method.name_id}], runtime->constants[{method.func_id}]);')
+        
+        self.output_code.append(f'    return (Object*)instance;')
+        self.output_code.append(f'}}')
+        self.output_code.append('')
+    
+    def _gen_native_class_def(self, class_info: ClassInfo):
+        """Generate class definition function for native paradigm"""
+        self.output_code.append(f'Object* def_class_{class_info.name}(Runtime* runtime) {{')
+        self.output_code.append(f'    /* Create native class {class_info.name} */')
+        self.output_code.append(f'    Object* cls = alloc_instance(runtime);')
+        self.output_code.append(f'    InstanceObject* cls_inst = (InstanceObject*)cls;')
+        self.output_code.append(f'    dict_set(runtime, cls_inst->__dict__, runtime->builtin_names.__typename__, runtime->constants[{class_info.name_id}]);')
+        
+        # Add __init__ to class
+        has_init = False
+        for method in class_info.methods:
+            if method.name == '__init__':
+                has_init = True
+                self.output_code.append(f'    /* Method: {method.name} */')
+                self.output_code.append(f'    dict_set(runtime, cls_inst->__dict__, runtime->constants[{method.name_id}], runtime->constants[{method.func_id}]);')
+                
+                # Add other instance methods to class
+                for method2 in class_info.methods:
+                    if method2.name == '__init__' or method2.is_static:
+                        continue
+                    self.output_code.append(f'    /* Initialize method: {method2.name} */')
+                    self.output_code.append(f'    dict_set(runtime, cls_inst->__dict__, runtime->constants[{method2.name_id}], runtime->constants[{method2.func_id}]);')
+                break
+        
+        self.output_code.append(f'    return cls;')
+        self.output_code.append(f'}}')
+        self.output_code.append('')
+    
     def _gen_class_method(self, class_info: ClassInfo, method_info: FunctionInfo):
         """Generate a method for a class"""
         # Get the cached method IR (already converted during IR generation)
@@ -382,6 +486,10 @@ class LLVMBackend:
         
         # Track declared variables for this method
         self.declared_vars = set()
+        
+        # Store current class info for native field access
+        self.current_class_info = class_info
+        self.current_method_paradigm = class_info.paradigm
         
         # Add self and other parameters to declared vars
         for param_name, _ in method_ir.params:
@@ -425,6 +533,21 @@ class LLVMBackend:
                 self.output_code.append(f'        exit(1);')
                 self.output_code.append(f'    }}')
             
+        # For native paradigm, cast self and extract native parameters
+        if class_info.paradigm == 'native':
+            self.output_code.append(f'    /* Native paradigm: cast self to native type */')
+            self.output_code.append(f'    {class_info.name}* self_native = ({class_info.name}*)self;')
+            
+            # For native methods, extract and unbox parameters to native types
+            for i, (param_name, param_type) in enumerate(method_ir.params):
+                if param_name != 'self' and param_type in ['int', 'float', 'bool']:
+                    c_type = self._map_type_to_c(param_type)
+                    if param_type == 'int':
+                        self.output_code.append(f'    {c_type} {param_name}_native = NgCastToInt(runtime, {param_name});')
+                    elif param_type == 'float':
+                        self.output_code.append(f'    {c_type} {param_name}_native = NgCastToFloat(runtime, {param_name});')
+                    elif param_type == 'bool':
+                        self.output_code.append(f'    {c_type} {param_name}_native = NgCastToBool(runtime, {param_name});')
         
         # Verify hmap_get(self.hmap, symbol_id) against expected types for strict parameters (symbol_id should be of '__typename__' convention)
             
@@ -437,6 +560,10 @@ class LLVMBackend:
         has_return = any(isinstance(stmt, ReturnIR) for stmt in method_ir.body)
         if not has_return:
             self.output_code.append('    return NULL;')
+        
+        # Clear current class info
+        self.current_class_info = None
+        self.current_method_paradigm = 'object'
         
         self.output_code.append('}')
         self.output_code.append('')
@@ -539,6 +666,39 @@ class LLVMBackend:
             # Set attribute on object
             obj_code = self._gen_expr(stmt.obj)
             value_code = self._gen_expr(stmt.value)
+            
+            # Check if this is native field assignment (self.field in native method)
+            if (self.current_method_paradigm == 'native' and 
+                isinstance(stmt.obj, VariableIR) and stmt.obj.name == 'self' and
+                self.current_class_info):
+                # Native paradigm: direct field assignment
+                field_name = None
+                # Find the field name from the constant
+                for const_id, const_val in self.ir.consts.items():
+                    if const_id == stmt.attr and isinstance(const_val, tuple) and const_val[1] == 'alloc_str':
+                        field_name = const_val[0].strip('"')
+                        break
+                
+                if field_name and any(f.name == field_name for f in self.current_class_info.fields):
+                    # Get the field type
+                    field_type = None
+                    for f in self.current_class_info.fields:
+                        if f.name == field_name:
+                            field_type = f.type_name
+                            break
+                    
+                    # For native fields, convert from Object to native type
+                    if field_type == 'int':
+                        result.append(f'{ind}self_native->{field_name} = NgCastToInt(runtime, {value_code});')
+                    elif field_type == 'float':
+                        result.append(f'{ind}self_native->{field_name} = NgCastToFloat(runtime, {value_code});')
+                    elif field_type == 'bool':
+                        result.append(f'{ind}self_native->{field_name} = NgCastToBool(runtime, {value_code});')
+                    else:
+                        result.append(f'{ind}self_native->{field_name} = {value_code};')
+                    return result
+            
+            # Object paradigm: use hash table
             result.append(f'{ind}NgSetMember(runtime, {obj_code}, runtime->constants[{stmt.attr}], {value_code});')
         
         elif isinstance(stmt, AugAssignIR):
@@ -1206,14 +1366,39 @@ class LLVMBackend:
         elif isinstance(expr, AttributeIR):
             # Member access
             obj_code = self._gen_expr(expr.obj)
-            # For InstanceObject, use dict_get with the __dict__
-            # For now, we'll use a simplified approach
-            # if isinstance(expr.obj, VariableIR) and expr.obj.name in self.declared_vars:
-                # Accessing member on a known variable (possibly self)
-                # Cast to InstanceObject and access via __dict__
-                # return f'dict_get(runtime, ((InstanceObject* ){obj_code})->__dict__, runtime->builtin_names.{expr.attr})'
+            
+            # Check if this is native field access (self.field in native method)
+            if (self.current_method_paradigm == 'native' and 
+                isinstance(expr.obj, VariableIR) and expr.obj.name == 'self' and
+                self.current_class_info):
+                # Native paradigm: direct field access
+                field_name = None
+                field_type = None
+                # Find the field name from the constant
+                for const_id, const_val in self.ir.consts.items():
+                    if const_id == expr.attr and isinstance(const_val, tuple) and const_val[1] == 'alloc_str':
+                        field_name = const_val[0].strip('"')
+                        break
+                
+                if field_name:
+                    for f in self.current_class_info.fields:
+                        if f.name == field_name:
+                            field_type = f.type_name
+                            break
+                
+                if field_name and field_type:
+                    # For native fields, box the value to Object*
+                    if field_type == 'int':
+                        return f'alloc_int(runtime, self_native->{field_name})'
+                    elif field_type == 'float':
+                        return f'alloc_float(runtime, self_native->{field_name})'
+                    elif field_type == 'bool':
+                        return f'alloc_bool(runtime, self_native->{field_name})'
+                    else:
+                        return f'self_native->{field_name}'
+            
+            # Object paradigm or accessing other objects: use hash table
             return f'NgGetMember(runtime, {obj_code}, runtime->constants[{expr.attr}])'
-            # return f'{obj_code}.{expr.attr}'
         
         elif isinstance(expr, SubscriptIR):
             # Subscript access (obj[index])

@@ -206,6 +206,14 @@ class NaginiParser:
                 # This is a field definition with type annotation (e.g., x: int)
                 field_name = item.target.id
                 type_name = self._extract_type_name(item.annotation)
+                
+                # Validate native paradigm classes require strict type annotations
+                if paradigm == 'native' and type_name == 'unknown':
+                    raise SyntaxError(
+                        f"Native paradigm class '{node.name}' requires strict type annotation for field '{field_name}'. "
+                        f"Please specify a type (e.g., {field_name}: float)"
+                    )
+                
                 size = self.TYPE_SIZES.get(type_name, 8)  # Get size in bytes
                 
                 # Create field info with calculated offset
