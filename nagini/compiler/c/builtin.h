@@ -303,22 +303,38 @@ typedef struct List {
  * Note: You likely have an 'allocator' for InstanceObjects, 
  * but here is the logic for the List internals.
  */
-void list_init(List* list, size_t initial_capacity) {
+void list_init(Runtime* runtime, List* list, size_t initial_capacity) {
     list->size = 0;
     list->capacity = (initial_capacity > 0) ? initial_capacity : 4;
-    list->items = (Object**) malloc(sizeof(Object*) * list->capacity);
+    size_t size = sizeof(Object*) * list->capacity;
+    bool is_manual = false;
+    int pool_id = 0;
+
+    list->items = (Object**)alloc(runtime, size, &is_manual, &pool_id, true);
+    // (Object**) malloc(sizeof(Object*) * list->capacity);
+    list->base.__allocation__.is_manual = is_manual ? 1 : 0;
+    list->base.__allocation__.pool_id = pool_id;
 }
 
 /* * Append: Grows the list geometrically (2x) 
  */
-int list_append(List* list, Object* item) {
+#define LIST_GROWTH 2
+int list_append(Runtime* runtime, List* list, Object* item) {
     if (list->size >= list->capacity) {
-        size_t new_capacity = list->capacity * 2;
-        Object** new_items = (Object**)realloc(list->items, sizeof(Object*) * new_capacity);
-        if (!new_items) return -1; // Allocation failed
+        size_t old_size = list->capacity;
+        size_t new_size = list->capacity * LIST_GROWTH;
+        bool is_manual = false;
+        int pool_id = 0;
+        Object** old_items = list->items;
+        list->items = (Object**)alloc(runtime, new_size * sizeof(Object*), &is_manual, &pool_id, true);
+        // realloc(list->items, sizeof(Object*) * new_capacity);
+        if (!list->items) return -1;
+        memcpy(list->items, old_items, old_size * sizeof(Object*));
+        del(runtime, old_items, list->base.__allocation__.is_manual, list->base.__allocation__.pool_id);
+        list->base.__allocation__.is_manual = is_manual ? 1 : 0;
+        list->base.__allocation__.pool_id = pool_id;
 
-        list->items = new_items;
-        list->capacity = new_capacity;
+        list->capacity = new_size;
     }
 
     list->items[list->size++] = item;
@@ -338,7 +354,7 @@ void NgAppend(Runtime* runtime, Tuple* args, Dict* kwargs) {
     List* list = (List*)args->items[0];
     Object* item = args->items[1];
 
-    list_append(list, (Object*)INCREF(runtime, item));
+    list_append(runtime, list, (Object*)INCREF(runtime, item));
 }
 
 /* * Find: Returns index or -1 
@@ -453,7 +469,7 @@ void NgExtend(Runtime* runtime, Tuple* args, Dict* kwargs) {
     List* other = (List*)args->items[1];
     List* newl = (List*)alloc_list_empty(runtime, list->size + other->size);
     for (size_t i = 0; i < list->size; i++) {
-        list_append(newl, (Object*)INCREF(runtime, list->items[i]));
+        list_append(runtime, newl, (Object*)INCREF(runtime, list->items[i]));
     }
 
     if (list_add(newl, other) != 0) {
@@ -2460,7 +2476,7 @@ Object* alloc_list(Runtime* runtime) {
     list->base.__flags__.type = OBJ_TYPE_LIST;
     list->__dict__ = NULL;
 
-    list_init(list, 1);
+    list_init(runtime, list, 1);
     return add_list_functions(runtime, list);
 }
 
@@ -2472,7 +2488,7 @@ Object* alloc_list_empty(Runtime* runtime, size_t capacity) {
     list->base.__flags__.type = OBJ_TYPE_LIST;
     list->__dict__ = NULL;
 
-    list_init(list, capacity);
+    list_init(runtime, list, capacity);
     for (size_t i = 0; i < capacity; i++) {
         list->items[i] = NULL;
     }
@@ -2487,7 +2503,7 @@ Object* alloc_list_prefill(Runtime* runtime, size_t size, Object** items) {
     list->base.__flags__.type = OBJ_TYPE_LIST;
     list->__dict__ = NULL;
 
-    list_init(list, size);
+    list_init(runtime, list, size);
     list->size = size;
     
     for (size_t i = 0; i < size; i++) {
