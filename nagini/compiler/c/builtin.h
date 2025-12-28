@@ -306,14 +306,7 @@ typedef struct List {
 void list_init(Runtime* runtime, List* list, size_t initial_capacity) {
     list->size = 0;
     list->capacity = (initial_capacity > 0) ? initial_capacity : 4;
-    size_t size = sizeof(Object*) * list->capacity;
-    bool is_manual = false;
-    int pool_id = 0;
-
-    list->items = (Object**)alloc(runtime, size, &is_manual, &pool_id, true);
-    // (Object**) malloc(sizeof(Object*) * list->capacity);
-    list->base.__allocation__.is_manual = is_manual ? 1 : 0;
-    list->base.__allocation__.pool_id = pool_id;
+    list->items = (Object**) malloc(sizeof(Object*) * list->capacity);
 }
 
 /* * Append: Grows the list geometrically (2x) 
@@ -323,17 +316,9 @@ int list_append(Runtime* runtime, List* list, Object* item) {
     if (list->size >= list->capacity) {
         size_t old_size = list->capacity;
         size_t new_size = list->capacity * LIST_GROWTH;
-        bool is_manual = false;
-        int pool_id = 0;
-        Object** old_items = list->items;
-        list->items = (Object**)alloc(runtime, new_size * sizeof(Object*), &is_manual, &pool_id, true);
-        // realloc(list->items, sizeof(Object*) * new_capacity);
-        if (!list->items) return -1;
-        memcpy(list->items, old_items, old_size * sizeof(Object*));
-        del(runtime, old_items, list->base.__allocation__.is_manual, list->base.__allocation__.pool_id);
-        list->base.__allocation__.is_manual = is_manual ? 1 : 0;
-        list->base.__allocation__.pool_id = pool_id;
-
+        Object** new_items = (Object**)realloc(list->items, new_size * sizeof(Object*));
+        if (!new_items) return -1;
+        list->items = new_items;
         list->capacity = new_size;
     }
 
@@ -2426,8 +2411,8 @@ Object* add_list_functions(Runtime* runtime, List* list) {
         runtime,
         "append",
         0,
-        1,
-        (void*)list_append
+        2,
+        (void*)NgAppend
     ));
     NgSetMember(runtime, (Object*)list, runtime->builtin_names.pop, (Object*)alloc_function(
         runtime,
