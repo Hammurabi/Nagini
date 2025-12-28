@@ -26,6 +26,8 @@ class NativeVec3:
         self.x = x
         self.y = y
         self.z = z
+    def mul(self, scalar: float):
+        return NativeVec3(self.x * scalar, self.y * scalar, self.z * scalar)
     def magnitude(self) -> float:
         return (self.x**2 + self.y**2 + self.z**2) ** 0.5
     def __str__(self) -> str:
