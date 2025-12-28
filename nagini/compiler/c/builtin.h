@@ -110,6 +110,7 @@ const char* NgToCString(Runtime* runtime, void* obj);
 Object* NgCall(Runtime* runtime, void* func, void* args, void* kwargs);
 void NgGetTypeName(Runtime* runtime, void* oo, char* buffer, size_t size);
 int64_t NgCastToInt(Runtime* runtime, void* obj);
+Object* alloc_list_prefill(Runtime* runtime, size_t size, Object** items);
 
 #if defined(__linux__) || defined(__unix__)
 void siphash_random_key(uint8_t key[16]) {
@@ -1784,6 +1785,38 @@ Object* NgToString(Runtime* runtime, void* obj) {
             // Convert the pointer to string
             char buffer[131072];
             snprintf(buffer, sizeof(buffer), "<Instance at %p>", (void*)o);
+            return alloc_str(runtime, buffer);
+        }
+        case OBJ_TYPE_DICT: {
+            Dict* dict = (Dict*)o;
+            char buffer[262144];
+            memset(buffer, 0, sizeof(buffer));
+            buffer[0] = '{';
+            buffer[1] = '\0';
+            char* quote = "\"";
+            size_t added = 0;
+            for (size_t i = 0; i < dict->capacity; i++) {
+                if (dict->entries[i].key == NULL) continue;
+                Object* key = dict->entries[i].key;
+                Object* value = dict->entries[i].value;
+                const char* key_cstr = NgToCString(runtime, key);
+                const char* value_cstr = NgToCString(runtime, value);
+                bool key_is_str = key && key->__flags__.type == OBJ_TYPE_STRING;
+                bool value_is_str = value && value->__flags__.type == OBJ_TYPE_STRING;
+                if (added > 0) {
+                    strncat(buffer, ", ", sizeof(buffer) - strlen(buffer) - 1);
+                }
+                if (key_is_str) strncat(buffer, quote, sizeof(buffer) - strlen(buffer) - 1);
+                strncat(buffer, key_cstr, sizeof(buffer) - strlen(buffer) - 1);
+                if (key_is_str) strncat(buffer, quote, sizeof(buffer) - strlen(buffer) - 1);
+                strncat(buffer, ": ", sizeof(buffer) - strlen(buffer) - 1);
+                if (value_is_str) strncat(buffer, quote, sizeof(buffer) - strlen(buffer) - 1);
+                strncat(buffer, value_cstr, sizeof(buffer) - strlen(buffer) - 1);
+                if (value_is_str) strncat(buffer, quote, sizeof(buffer) - strlen(buffer) - 1);
+                added++;
+            }
+            buffer[strlen(buffer)] = '}';
+            buffer[strlen(buffer) + 1] = '\0';
             return alloc_str(runtime, buffer);
         }
         default:
