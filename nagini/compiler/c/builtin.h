@@ -2402,6 +2402,8 @@ Object* NgDictCopyMethod(Runtime* runtime, Tuple* args, Dict* kwargs) {
 
 /* Dict functions */
 static Dict* alloc_dict_internal(Runtime* runtime, bool add_methods) {
+    // Internal allocator for Dict. Set add_methods=false when creating hidden
+    // __dict__ objects for instances to avoid recursive method registration.
     Dict* d = (Dict*) dynamic_pool_alloc(runtime->pool->dict);
     if (!d) return NULL;
 

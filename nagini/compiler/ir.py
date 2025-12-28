@@ -735,6 +735,8 @@ class NaginiIR:
             return ListIR(elements)
         
         elif isinstance(expr, ast.Dict):
+            if any(k is None for k in expr.keys):
+                raise NotImplementedError("Dict unpacking is not supported yet")
             keys = [self._convert_expr_to_ir(k) for k in expr.keys]
             values = [self._convert_expr_to_ir(v) for v in expr.values]
             return DictIR(keys, values)
