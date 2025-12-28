@@ -1770,8 +1770,9 @@ Object* NgToString(Runtime* runtime, void* obj) {
                 strncat(buffer, item_cstr, sizeof(buffer) - strlen(buffer) - 1);
                 if (is_str) strncat(buffer, quote, sizeof(buffer) - strlen(buffer) - 1);
             }
-            buffer[strlen(buffer)] = ')';
-            buffer[strlen(buffer) + 1] = '\0';
+            size_t end = strlen(buffer);
+            buffer[end] = ')';
+            buffer[end + 1] = '\0';
             return alloc_str(runtime, buffer);
         }
         case OBJ_TYPE_LIST: {
@@ -1793,8 +1794,9 @@ Object* NgToString(Runtime* runtime, void* obj) {
                 strncat(buffer, item_cstr, sizeof(buffer) - strlen(buffer) - 1);
                 if (is_str) strncat(buffer, quote, sizeof(buffer) - strlen(buffer) - 1);
             }
-            buffer[strlen(buffer)] = ']';
-            buffer[strlen(buffer) + 1] = '\0';
+            size_t end = strlen(buffer);
+            buffer[end] = ']';
+            buffer[end + 1] = '\0';
             return alloc_str(runtime, buffer);
         }
         case OBJ_TYPE_SET: {
@@ -1821,8 +1823,9 @@ Object* NgToString(Runtime* runtime, void* obj) {
                     added++;
                 }
             }
-            buffer[strlen(buffer)] = '}';
-            buffer[strlen(buffer) + 1] = '\0';
+            size_t end = strlen(buffer);
+            buffer[end] = '}';
+            buffer[end + 1] = '\0';
             return alloc_str(runtime, buffer);
         }
         case OBJ_TYPE_INSTANCE: {
@@ -3674,6 +3677,17 @@ Object* alloc_set(Runtime* runtime) {
     return (Object*)alloc_set_internal(runtime, true);
 }
 
+static void _set_add_all(Runtime* runtime, Set* dest, Object* iterable) {
+    Object* iter = NgIter(runtime, iterable);
+    if (!iter) return;
+    Object* next;
+    while ((next = NgIterNext(runtime, iter)) != NULL) {
+        dict_set(runtime, dest->table, next, (Object*)runtime->builtin_names.none);
+        DECREF(runtime, next);
+    }
+    DECREF(runtime, iter);
+}
+
 Object* NgBuildSet(Runtime* runtime, size_t count, Object** items) {
     Set* set = alloc_set_internal(runtime, true);
     for (size_t i = 0; i < count; i++) {
@@ -3684,14 +3698,7 @@ Object* NgBuildSet(Runtime* runtime, size_t count, Object** items) {
 
 Object* NgSetFromIterable(Runtime* runtime, void* iterable) {
     Set* set = alloc_set_internal(runtime, true);
-    Object* iter = NgIter(runtime, iterable);
-    if (!iter) return (Object*)set;
-    Object* next;
-    while ((next = NgIterNext(runtime, iter)) != NULL) {
-        dict_set(runtime, set->table, next, (Object*)runtime->builtin_names.none);
-        DECREF(runtime, next);
-    }
-    DECREF(runtime, iter);
+    _set_add_all(runtime, set, iterable);
     return (Object*)set;
 }
 
@@ -3762,17 +3769,6 @@ Object* NgSetPop(Runtime* runtime, Tuple* args, Dict* kwargs) {
         return result;
     }
     return (Object*)runtime->builtin_names.none;
-}
-
-static void _set_add_all(Runtime* runtime, Set* dest, Object* iterable) {
-    Object* iter = NgIter(runtime, iterable);
-    if (!iter) return;
-    Object* next;
-    while ((next = NgIterNext(runtime, iter)) != NULL) {
-        dict_set(runtime, dest->table, next, (Object*)runtime->builtin_names.none);
-        DECREF(runtime, next);
-    }
-    DECREF(runtime, iter);
 }
 
 Object* NgSetUnion(Runtime* runtime, Tuple* args, Dict* kwargs) {
