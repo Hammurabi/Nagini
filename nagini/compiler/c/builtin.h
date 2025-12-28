@@ -62,6 +62,9 @@ Object* alloc_function(Runtime* runtime, const char* name, int32_t line, size_t 
 Object* alloc_tuple(Runtime* runtime, size_t size, Object** objects);
 Object* alloc_list(Runtime* runtime);
 Object* alloc_list_empty(Runtime* runtime, size_t initial_capacity);
+Object* alloc_set(Runtime* runtime);
+Object* NgBuildSet(Runtime* runtime, size_t count, Object** items);
+Object* NgSetFromIterable(Runtime* runtime, void* iterable);
 Object* alloc_instance(Runtime* runtime);
 Object* alloc_object(Runtime* runtime, int32_t typename);
 Dict* alloc_dict(Runtime* runtime);
@@ -89,6 +92,20 @@ Object* NgDictPopItem(Runtime* runtime, Tuple* args, Dict* kwargs);
 Object* NgDictClear(Runtime* runtime, Tuple* args, Dict* kwargs);
 Object* NgDictUpdate(Runtime* runtime, Tuple* args, Dict* kwargs);
 Object* NgDictCopyMethod(Runtime* runtime, Tuple* args, Dict* kwargs);
+Object* NgSetAdd(Runtime* runtime, Tuple* args, Dict* kwargs);
+Object* NgSetDiscard(Runtime* runtime, Tuple* args, Dict* kwargs);
+Object* NgSetRemove(Runtime* runtime, Tuple* args, Dict* kwargs);
+Object* NgSetPop(Runtime* runtime, Tuple* args, Dict* kwargs);
+Object* NgSetClear(Runtime* runtime, Tuple* args, Dict* kwargs);
+Object* NgSetUnion(Runtime* runtime, Tuple* args, Dict* kwargs);
+Object* NgSetIntersection(Runtime* runtime, Tuple* args, Dict* kwargs);
+Object* NgSetDifference(Runtime* runtime, Tuple* args, Dict* kwargs);
+Object* NgSetSymmetricDifference(Runtime* runtime, Tuple* args, Dict* kwargs);
+Object* NgSetUpdate(Runtime* runtime, Tuple* args, Dict* kwargs);
+Object* NgSetCopy(Runtime* runtime, Tuple* args, Dict* kwargs);
+Object* NgSetIsSubset(Runtime* runtime, Tuple* args, Dict* kwargs);
+Object* NgSetIsSuperset(Runtime* runtime, Tuple* args, Dict* kwargs);
+Object* NgSetIsDisjoint(Runtime* runtime, Tuple* args, Dict* kwargs);
 Object* DECREF(Runtime* runtime, void* obj);
 void* INCREF(Runtime* runtime, void* obj);
 int64_t hash(Runtime* runtime, Object* obj);
@@ -617,7 +634,8 @@ typedef enum {
     ITER_KIND_DICT_VALUES = 3,
     ITER_KIND_DICT_ITEMS = 4,
     ITER_KIND_VIEW = 5,
-    ITER_KIND_DICT = 6
+    ITER_KIND_DICT = 6,
+    ITER_KIND_SET = 7
 } IterKind;
 
 typedef struct ViewObject {
@@ -1144,6 +1162,7 @@ Object* NgGeq(Runtime* runtime, void* aa, void* bb) {
 
 typedef struct Set {
     InstanceObject  base;
+    Dict*           table;
 } Set;
 
 typedef struct Function {
@@ -1176,6 +1195,15 @@ typedef struct BuiltinNames {
     StringObject* clear;
     StringObject* index;
     StringObject* extend;
+    StringObject* add;
+    StringObject* discard;
+    StringObject* set_union;
+    StringObject* intersection;
+    StringObject* difference;
+    StringObject* symmetric_difference;
+    StringObject* isdisjoint;
+    StringObject* issubset;
+    StringObject* issuperset;
     StringObject* keys;
     StringObject* values;
     StringObject* items;
@@ -1424,6 +1452,15 @@ Runtime* init_runtime() {
     runtime->builtin_names.clear  = (StringObject*) alloc_str(runtime, "clear");
     runtime->builtin_names.index  = (StringObject*) alloc_str(runtime, "index");
     runtime->builtin_names.extend = (StringObject*) alloc_str(runtime, "extend");
+    runtime->builtin_names.add    = (StringObject*) alloc_str(runtime, "add");
+    runtime->builtin_names.discard = (StringObject*) alloc_str(runtime, "discard");
+    runtime->builtin_names.set_union = (StringObject*) alloc_str(runtime, "union");
+    runtime->builtin_names.intersection = (StringObject*) alloc_str(runtime, "intersection");
+    runtime->builtin_names.difference = (StringObject*) alloc_str(runtime, "difference");
+    runtime->builtin_names.symmetric_difference = (StringObject*) alloc_str(runtime, "symmetric_difference");
+    runtime->builtin_names.isdisjoint = (StringObject*) alloc_str(runtime, "isdisjoint");
+    runtime->builtin_names.issubset = (StringObject*) alloc_str(runtime, "issubset");
+    runtime->builtin_names.issuperset = (StringObject*) alloc_str(runtime, "issuperset");
     runtime->builtin_names.keys   = (StringObject*) alloc_str(runtime, "keys");
     runtime->builtin_names.values = (StringObject*) alloc_str(runtime, "values");
     runtime->builtin_names.items  = (StringObject*) alloc_str(runtime, "items");
@@ -1661,6 +1698,11 @@ Object* NgLen(Runtime* runtime, Tuple* args, Dict* kwargs) {
             length = dict->count;
             break;
         }
+        case OBJ_TYPE_SET: {
+            Set* set = (Set*)obj;
+            length = set->table ? set->table->count : 0;
+            break;
+        }
         case OBJ_TYPE_VIEW: {
             ViewObject* view = (ViewObject*)obj;
             if (view->dict) length = view->dict->count;
@@ -1752,6 +1794,34 @@ Object* NgToString(Runtime* runtime, void* obj) {
                 if (is_str) strncat(buffer, quote, sizeof(buffer) - strlen(buffer) - 1);
             }
             buffer[strlen(buffer)] = ']';
+            buffer[strlen(buffer) + 1] = '\0';
+            return alloc_str(runtime, buffer);
+        }
+        case OBJ_TYPE_SET: {
+            Set* set = (Set*)o;
+            char buffer[262144];
+            memset(buffer, 0, sizeof(buffer));
+            buffer[0] = '{';
+            buffer[1] = '\0';
+            char* quote = "\"";
+            size_t added = 0;
+            Dict* table = set->table;
+            if (table) {
+                for (size_t i = 0; i < table->capacity; i++) {
+                    dict_entry_t* entry = &table->entries[i];
+                    if (entry->psl == 0) continue;
+                    const char* item_cstr = NgToCString(runtime, entry->key);
+                    bool is_str = entry->key && entry->key->__flags__.type == OBJ_TYPE_STRING;
+                    if (added > 0) {
+                        strncat(buffer, ", ", sizeof(buffer) - strlen(buffer) - 1);
+                    }
+                    if (is_str) strncat(buffer, quote, sizeof(buffer) - strlen(buffer) - 1);
+                    strncat(buffer, item_cstr, sizeof(buffer) - strlen(buffer) - 1);
+                    if (is_str) strncat(buffer, quote, sizeof(buffer) - strlen(buffer) - 1);
+                    added++;
+                }
+            }
+            buffer[strlen(buffer)] = '}';
             buffer[strlen(buffer) + 1] = '\0';
             return alloc_str(runtime, buffer);
         }
@@ -2131,6 +2201,8 @@ Object* NgIter(Runtime* runtime, void* obj) {
             return alloc_iterator(runtime, o, ITER_KIND_TUPLE);
         case OBJ_TYPE_DICT:
             return alloc_iterator(runtime, o, ITER_KIND_DICT_KEYS);
+        case OBJ_TYPE_SET:
+            return alloc_iterator(runtime, o, ITER_KIND_SET);
         case OBJ_TYPE_VIEW: {
             ViewObject* view = (ViewObject*)o;
             uint8_t kind = ITER_KIND_DICT_KEYS;
@@ -2182,6 +2254,18 @@ Object* NgIterNext(Runtime* runtime, void* iter) {
             }
             return NULL;
         }
+        case ITER_KIND_SET: {
+            if (it->iterable->__flags__.type != OBJ_TYPE_SET) return NULL;
+            Set* set = (Set*)it->iterable;
+            Dict* table = set->table;
+            if (!table) return NULL;
+            while (it->index < table->capacity) {
+                dict_entry_t* entry = &table->entries[it->index++];
+                if (entry->psl == 0) continue;
+                return INCREF(runtime, entry->key);
+            }
+            return NULL;
+        }
         default:
             return NULL;
     }
@@ -2211,6 +2295,12 @@ Object* NgContains(Runtime* runtime, void* container, void* item) {
         }
         case OBJ_TYPE_DICT: {
             Object* v = dict_get(runtime, container, item);
+            return alloc_bool(runtime, v != NULL);
+        }
+        case OBJ_TYPE_SET: {
+            Set* set = (Set*)obj;
+            Dict* table = set->table;
+            Object* v = table ? dict_get(runtime, table, item) : NULL;
             return alloc_bool(runtime, v != NULL);
         }
         case OBJ_TYPE_VIEW: {
@@ -3190,6 +3280,12 @@ Object* DECREF(Runtime* runtime, void* obj) {
                 }
                 case OBJ_TYPE_SET: {
                     Set* set = (Set*)o;
+                    if (set->table) {
+                        dict_destroy(runtime, set->table);
+                    }
+                    if (set->base.__dict__) {
+                        DECREF(runtime, set->base.__dict__);
+                    }
                     if (is_manual) {
                         del(runtime, o, is_manual, o->__allocation__.pool_id);
                     } else {
@@ -3528,4 +3624,344 @@ const char* obj_type_name(Runtime* runtime, void* oo) {
         return obj_type_names[type];
     }
     return "unknown";
+}
+
+Object* add_set_functions(Runtime* runtime, Set* set) {
+    NgSetMember(runtime, (Object*)set, runtime->builtin_names.add, (Object*)alloc_function(
+        runtime, "add", 0, 2, (void*)NgSetAdd));
+    NgSetMember(runtime, (Object*)set, runtime->builtin_names.discard, (Object*)alloc_function(
+        runtime, "discard", 0, 1, (void*)NgSetDiscard));
+    NgSetMember(runtime, (Object*)set, runtime->builtin_names.remove, (Object*)alloc_function(
+        runtime, "remove", 0, 1, (void*)NgSetRemove));
+    NgSetMember(runtime, (Object*)set, runtime->builtin_names.pop, (Object*)alloc_function(
+        runtime, "pop", 0, 0, (void*)NgSetPop));
+    NgSetMember(runtime, (Object*)set, runtime->builtin_names.clear, (Object*)alloc_function(
+        runtime, "clear", 0, 0, (void*)NgSetClear));
+    NgSetMember(runtime, (Object*)set, runtime->builtin_names.set_union, (Object*)alloc_function(
+        runtime, "union", 0, 1, (void*)NgSetUnion));
+    NgSetMember(runtime, (Object*)set, runtime->builtin_names.intersection, (Object*)alloc_function(
+        runtime, "intersection", 0, 1, (void*)NgSetIntersection));
+    NgSetMember(runtime, (Object*)set, runtime->builtin_names.difference, (Object*)alloc_function(
+        runtime, "difference", 0, 1, (void*)NgSetDifference));
+    NgSetMember(runtime, (Object*)set, runtime->builtin_names.symmetric_difference, (Object*)alloc_function(
+        runtime, "symmetric_difference", 0, 1, (void*)NgSetSymmetricDifference));
+    NgSetMember(runtime, (Object*)set, runtime->builtin_names.update, (Object*)alloc_function(
+        runtime, "update", 0, 1, (void*)NgSetUpdate));
+    NgSetMember(runtime, (Object*)set, runtime->builtin_names.copy, (Object*)alloc_function(
+        runtime, "copy", 0, 0, (void*)NgSetCopy));
+    NgSetMember(runtime, (Object*)set, runtime->builtin_names.isdisjoint, (Object*)alloc_function(
+        runtime, "isdisjoint", 0, 1, (void*)NgSetIsDisjoint));
+    NgSetMember(runtime, (Object*)set, runtime->builtin_names.issubset, (Object*)alloc_function(
+        runtime, "issubset", 0, 1, (void*)NgSetIsSubset));
+    NgSetMember(runtime, (Object*)set, runtime->builtin_names.issuperset, (Object*)alloc_function(
+        runtime, "issuperset", 0, 1, (void*)NgSetIsSuperset));
+    return (Object*)set;
+}
+
+static Set* alloc_set_internal(Runtime* runtime, bool add_methods) {
+    Set* set = (Set*) dynamic_pool_alloc(runtime->pool->set);
+    set->base.base.__typename__ = get_symbol_id(runtime, "set");
+    set->base.base.__refcount__ = 1;
+    set->base.base.__allocation__.is_manual = 0;
+    set->base.base.__flags__.type = OBJ_TYPE_SET;
+    set->base.__dict__ = NULL;
+    set->table = alloc_dict_internal(runtime, false);
+    if (add_methods) add_set_functions(runtime, set);
+    return set;
+}
+
+Object* alloc_set(Runtime* runtime) {
+    return (Object*)alloc_set_internal(runtime, true);
+}
+
+Object* NgBuildSet(Runtime* runtime, size_t count, Object** items) {
+    Set* set = alloc_set_internal(runtime, true);
+    for (size_t i = 0; i < count; i++) {
+        dict_set(runtime, set->table, items[i], (Object*)runtime->builtin_names.none);
+    }
+    return (Object*)set;
+}
+
+Object* NgSetFromIterable(Runtime* runtime, void* iterable) {
+    Set* set = alloc_set_internal(runtime, true);
+    Object* iter = NgIter(runtime, iterable);
+    if (!iter) return (Object*)set;
+    Object* next;
+    while ((next = NgIterNext(runtime, iter)) != NULL) {
+        dict_set(runtime, set->table, next, (Object*)runtime->builtin_names.none);
+        DECREF(runtime, next);
+    }
+    DECREF(runtime, iter);
+    return (Object*)set;
+}
+
+Object* NgSetAdd(Runtime* runtime, Tuple* args, Dict* kwargs) {
+    if (!args || args->size < 2) {
+        fprintf(stderr, "TypeError: add() missing required argument\n");
+        exit(1);
+    }
+    Set* set = (Set*)args->items[0];
+    Object* item = args->items[1];
+    dict_set(runtime, set->table, item, (Object*)runtime->builtin_names.none);
+    return (Object*)runtime->builtin_names.none;
+}
+
+Object* NgSetDiscard(Runtime* runtime, Tuple* args, Dict* kwargs) {
+    if (!args || args->size < 2) {
+        fprintf(stderr, "TypeError: discard() missing required argument\n");
+        exit(1);
+    }
+    Set* set = (Set*)args->items[0];
+    Object* item = args->items[1];
+    dict_del(runtime, set->table, item);
+    return (Object*)runtime->builtin_names.none;
+}
+
+Object* NgSetRemove(Runtime* runtime, Tuple* args, Dict* kwargs) {
+    if (!args || args->size < 2) {
+        fprintf(stderr, "TypeError: remove() missing required argument\n");
+        exit(1);
+    }
+    Set* set = (Set*)args->items[0];
+    Object* item = args->items[1];
+    if (!dict_del(runtime, set->table, item)) {
+        fprintf(stderr, "KeyError: key not found in set\n");
+        exit(1);
+    }
+    return (Object*)runtime->builtin_names.none;
+}
+
+Object* NgSetClear(Runtime* runtime, Tuple* args, Dict* kwargs) {
+    if (!args || args->size < 1) {
+        fprintf(stderr, "TypeError: clear() missing required argument\n");
+        exit(1);
+    }
+    Set* set = (Set*)args->items[0];
+    dict_destroy(runtime, set->table);
+    set->table = alloc_dict_internal(runtime, false);
+    return (Object*)runtime->builtin_names.none;
+}
+
+Object* NgSetPop(Runtime* runtime, Tuple* args, Dict* kwargs) {
+    if (!args || args->size < 1) {
+        fprintf(stderr, "TypeError: pop() missing required argument\n");
+        exit(1);
+    }
+    Set* set = (Set*)args->items[0];
+    Dict* table = set->table;
+    if (!table || table->count == 0) {
+        fprintf(stderr, "KeyError: pop from an empty set\n");
+        exit(1);
+    }
+    for (size_t i = 0; i < table->capacity; i++) {
+        dict_entry_t* entry = &table->entries[i];
+        if (entry->psl == 0) continue;
+        Object* key = entry->key;
+        Object* result = (Object*)INCREF(runtime, key);
+        dict_del(runtime, table, key);
+        return result;
+    }
+    return (Object*)runtime->builtin_names.none;
+}
+
+static void _set_add_all(Runtime* runtime, Set* dest, Object* iterable) {
+    Object* iter = NgIter(runtime, iterable);
+    if (!iter) return;
+    Object* next;
+    while ((next = NgIterNext(runtime, iter)) != NULL) {
+        dict_set(runtime, dest->table, next, (Object*)runtime->builtin_names.none);
+        DECREF(runtime, next);
+    }
+    DECREF(runtime, iter);
+}
+
+Object* NgSetUnion(Runtime* runtime, Tuple* args, Dict* kwargs) {
+    if (!args || args->size < 1) {
+        fprintf(stderr, "TypeError: union() missing required arguments\n");
+        exit(1);
+    }
+    Set* self = (Set*)args->items[0];
+    Set* result = alloc_set_internal(runtime, true);
+    Dict* table = self->table;
+    if (table) {
+        for (size_t i = 0; i < table->capacity; i++) {
+            dict_entry_t* entry = &table->entries[i];
+            if (entry->psl == 0) continue;
+            dict_set(runtime, result->table, entry->key, (Object*)runtime->builtin_names.none);
+        }
+    }
+    if (args->size > 1) {
+        _set_add_all(runtime, result, args->items[1]);
+    }
+    return (Object*)result;
+}
+
+Object* NgSetIntersection(Runtime* runtime, Tuple* args, Dict* kwargs) {
+    if (!args || args->size < 2) {
+        fprintf(stderr, "TypeError: intersection() missing required argument\n");
+        exit(1);
+    }
+    Set* self = (Set*)args->items[0];
+    Object* other = args->items[1];
+    Set* result = alloc_set_internal(runtime, true);
+    Dict* table = self->table;
+    if (table) {
+        for (size_t i = 0; i < table->capacity; i++) {
+            dict_entry_t* entry = &table->entries[i];
+            if (entry->psl == 0) continue;
+            Object* present = NgContains(runtime, other, entry->key);
+            int64_t val = present ? NgCastToInt(runtime, present) : 0;
+            if (present) DECREF(runtime, present);
+            if (val) {
+                dict_set(runtime, result->table, entry->key, (Object*)runtime->builtin_names.none);
+            }
+        }
+    }
+    return (Object*)result;
+}
+
+Object* NgSetDifference(Runtime* runtime, Tuple* args, Dict* kwargs) {
+    if (!args || args->size < 2) {
+        fprintf(stderr, "TypeError: difference() missing required argument\n");
+        exit(1);
+    }
+    Set* self = (Set*)args->items[0];
+    Object* other = args->items[1];
+    Set* result = alloc_set_internal(runtime, true);
+    Dict* table = self->table;
+    if (table) {
+        for (size_t i = 0; i < table->capacity; i++) {
+            dict_entry_t* entry = &table->entries[i];
+            if (entry->psl == 0) continue;
+            Object* present = NgContains(runtime, other, entry->key);
+            int64_t val = present ? NgCastToInt(runtime, present) : 0;
+            if (present) DECREF(runtime, present);
+            if (!val) {
+                dict_set(runtime, result->table, entry->key, (Object*)runtime->builtin_names.none);
+            }
+        }
+    }
+    return (Object*)result;
+}
+
+Object* NgSetSymmetricDifference(Runtime* runtime, Tuple* args, Dict* kwargs) {
+    if (!args || args->size < 2) {
+        fprintf(stderr, "TypeError: symmetric_difference() missing required argument\n");
+        exit(1);
+    }
+    Set* self = (Set*)args->items[0];
+    Object* other = args->items[1];
+    Set* result = alloc_set_internal(runtime, true);
+    Dict* table = self->table;
+    if (table) {
+        for (size_t i = 0; i < table->capacity; i++) {
+            dict_entry_t* entry = &table->entries[i];
+            if (entry->psl == 0) continue;
+            Object* present = NgContains(runtime, other, entry->key);
+            int64_t val = present ? NgCastToInt(runtime, present) : 0;
+            if (present) DECREF(runtime, present);
+            if (!val) {
+                dict_set(runtime, result->table, entry->key, (Object*)runtime->builtin_names.none);
+            }
+        }
+    }
+    _set_add_all(runtime, result, other);
+    return (Object*)result;
+}
+
+Object* NgSetUpdate(Runtime* runtime, Tuple* args, Dict* kwargs) {
+    if (!args || args->size < 2) {
+        fprintf(stderr, "TypeError: update() missing required argument\n");
+        exit(1);
+    }
+    Set* self = (Set*)args->items[0];
+    Object* other = args->items[1];
+    _set_add_all(runtime, self, other);
+    return (Object*)runtime->builtin_names.none;
+}
+
+Object* NgSetCopy(Runtime* runtime, Tuple* args, Dict* kwargs) {
+    if (!args || args->size < 1) {
+        fprintf(stderr, "TypeError: copy() missing required argument\n");
+        exit(1);
+    }
+    Set* self = (Set*)args->items[0];
+    Set* result = alloc_set_internal(runtime, true);
+    Dict* table = self->table;
+    if (table) {
+        for (size_t i = 0; i < table->capacity; i++) {
+            dict_entry_t* entry = &table->entries[i];
+            if (entry->psl == 0) continue;
+            dict_set(runtime, result->table, entry->key, (Object*)runtime->builtin_names.none);
+        }
+    }
+    return (Object*)result;
+}
+
+Object* NgSetIsSubset(Runtime* runtime, Tuple* args, Dict* kwargs) {
+    if (!args || args->size < 2) {
+        fprintf(stderr, "TypeError: issubset() missing required argument\n");
+        exit(1);
+    }
+    Set* self = (Set*)args->items[0];
+    Object* other = args->items[1];
+    Dict* table = self->table;
+    if (table) {
+        for (size_t i = 0; i < table->capacity; i++) {
+            dict_entry_t* entry = &table->entries[i];
+            if (entry->psl == 0) continue;
+            Object* present = NgContains(runtime, other, entry->key);
+            int64_t val = present ? NgCastToInt(runtime, present) : 0;
+            if (present) DECREF(runtime, present);
+            if (!val) {
+                return alloc_bool(runtime, false);
+            }
+        }
+    }
+    return alloc_bool(runtime, true);
+}
+
+Object* NgSetIsSuperset(Runtime* runtime, Tuple* args, Dict* kwargs) {
+    if (!args || args->size < 2) {
+        fprintf(stderr, "TypeError: issuperset() missing required argument\n");
+        exit(1);
+    }
+    Set* self = (Set*)args->items[0];
+    Object* other = args->items[1];
+    Object* iter = NgIter(runtime, other);
+    if (!iter) return alloc_bool(runtime, true);
+    Object* next;
+    while ((next = NgIterNext(runtime, iter)) != NULL) {
+        bool contains = dict_get(runtime, self->table, next) != NULL;
+        DECREF(runtime, next);
+        if (!contains) {
+            DECREF(runtime, iter);
+            return alloc_bool(runtime, false);
+        }
+    }
+    DECREF(runtime, iter);
+    return alloc_bool(runtime, true);
+}
+
+Object* NgSetIsDisjoint(Runtime* runtime, Tuple* args, Dict* kwargs) {
+    if (!args || args->size < 2) {
+        fprintf(stderr, "TypeError: isdisjoint() missing required argument\n");
+        exit(1);
+    }
+    Set* self = (Set*)args->items[0];
+    Object* other = args->items[1];
+    Dict* table = self->table;
+    if (table) {
+        for (size_t i = 0; i < table->capacity; i++) {
+            dict_entry_t* entry = &table->entries[i];
+            if (entry->psl == 0) continue;
+            Object* present = NgContains(runtime, other, entry->key);
+            int64_t val = present ? NgCastToInt(runtime, present) : 0;
+            if (present) DECREF(runtime, present);
+            if (val) {
+                return alloc_bool(runtime, false);
+            }
+        }
+    }
+    return alloc_bool(runtime, true);
 }

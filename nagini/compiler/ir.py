@@ -104,6 +104,12 @@ class DictIR(ExprIR):
     keys: List[ExprIR]
     values: List[ExprIR]
 
+
+@dataclass
+class SetIR(ExprIR):
+    """Set literal"""
+    elements: List[ExprIR]
+
 @dataclass
 class JoinedStrIR(ExprIR):
     """Joined string (f-string)"""
@@ -740,6 +746,11 @@ class NaginiIR:
             keys = [self._convert_expr_to_ir(k) for k in expr.keys]
             values = [self._convert_expr_to_ir(v) for v in expr.values]
             return DictIR(keys, values)
+
+        elif isinstance(expr, ast.Set):
+            # Set literal
+            elements = [self._convert_expr_to_ir(e) for e in expr.elts]
+            return SetIR(elements)
         
         # Return a placeholder for unsupported expressions
         # TODO: Add better error handling or warnings for unsupported expression types

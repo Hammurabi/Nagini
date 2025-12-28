@@ -16,7 +16,7 @@ from .ir import (
     AssignIR, SubscriptAssignIR, ReturnIR, IfIR, WhileIR, ForIR, ExprStmtIR, WithIR,
     ConstructorCallIR, LambdaIR, BoxIR, UnboxIR, SubscriptIR,
     SetAttrIR, JoinedStrIR, FormattedValueIR, AugAssignIR, MultiAssignIR, SliceIR,
-    TupleIR, ListIR, DictIR
+    TupleIR, ListIR, DictIR, SetIR
 )
 
 fun_ids = {}
@@ -1068,6 +1068,12 @@ class LLVMBackend:
             if elements_code:
                 return f'alloc_list_prefill(runtime, {len(elements_code)}, (Object*[]) {{{", ".join(elements_code)}}})'
             return 'alloc_list(runtime)'
+
+        elif isinstance(expr, SetIR):
+            elements_code = [self._gen_expr(e) for e in expr.elements]
+            if elements_code:
+                return f'NgBuildSet(runtime, {len(elements_code)}, (Object*[]) {{{", ".join(elements_code)}}})'
+            return 'alloc_set(runtime)'
         
         elif isinstance(expr, DictIR):
             keys_code = [self._gen_expr(k) for k in expr.keys]
@@ -1186,6 +1192,11 @@ class LLVMBackend:
                         arg_code = self._gen_expr(expr.args[0])
                         return f'NgDictFromIterable(runtime, {arg_code})'
                     return 'alloc_dict(runtime)'
+                elif expr.func_name == 'set':
+                    if expr.args:
+                        arg_code = self._gen_expr(expr.args[0])
+                        return f'NgSetFromIterable(runtime, {arg_code})'
+                    return 'alloc_set(runtime)'
                 ident = fun_ids.get(expr.func_name)
                 if not ident:
                     ident = gen_uuid(16)
