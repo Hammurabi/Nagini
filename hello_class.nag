@@ -14,6 +14,8 @@ class Vec3:
     def __str__(self) -> str:
         # return "vec"
         return f"Vec3({self.x:.2f}, {self.y:.2f}, {self.z:.2f})"
+    def __len__(self) -> int:
+        return self.magnitude()
 
 def fibonacci(n: int):
     a, b = 0, 1
@@ -30,6 +32,7 @@ if __name__ == "__main__":
     print('hello member methods:')
     print(v.magnitude())
     print(v)
+    print(len(v))
     print('hello loops:')
     total = 0
     for i in range(5):
@@ -59,6 +62,8 @@ if __name__ == "__main__":
     print(f'list pop(4): {lst.pop(4)}')
     print(lst)
     print(f'list pop(): {lst.pop()}')
+    print(lst)
+    print(len(lst))
     # with nexc('cpu') as optim: # or gpu
     #     array = optim.array(300, type=optim.fp32)
     #     for i in range(100):

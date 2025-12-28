@@ -69,7 +69,7 @@ void dict_destroy(Runtime* runtime, void* d);
 Object* DECREF(Runtime* runtime, void* obj);
 void* INCREF(Runtime* runtime, void* obj);
 int64_t hash(Runtime* runtime, Object* obj);
-const char* obj_type_name(void* oo);
+const char* obj_type_name(Runtime* runtime, void* oo);
 Object* NgAdd(Runtime* runtime, void* aa, void* bb);
 Object* NgSub(Runtime* runtime, void* aa, void* bb);
 Object* NgMul(Runtime* runtime, void* aa, void* bb);
@@ -653,7 +653,7 @@ Object* NgGetMember(Runtime* runtime, void* ii, void* mm) {
     Dict* dict = instance->__dict__;
     if (!dict) return NULL;
 
-    return dict_get(runtime, dict, (Object*)member);
+    return INCREF(runtime, dict_get(runtime, dict, (Object*)member));
 }
 
 void NgSetMember(Runtime* runtime, void* ii, void* mm, void* vv) {
@@ -708,7 +708,7 @@ Object* NgGetItem(Runtime* runtime, void* obj, void* index) {
         default:
             fprintf(stderr,
                 "TypeError: object of type '%s' is not subscriptable\n",
-                obj_type_name(container)
+                obj_type_name(runtime, container)
             );
             exit(1);
     }
@@ -750,7 +750,7 @@ void NgSetItem(Runtime* runtime, void* obj, void* index, void* value) {
         default:
             fprintf(stderr,
                 "TypeError: object of type '%s' does not support item assignment\n",
-                obj_type_name(container)
+                obj_type_name(runtime, container)
             );
             exit(1);
     }
@@ -794,8 +794,8 @@ inline Object* NgAdd(Runtime* runtime, void* aa, void* bb) {
     // Unsupported types
     fprintf(stderr,
         "TypeError: unsupported operand type(s) for +: '%s' and '%s'\n",
-        obj_type_name(a),
-        obj_type_name(b)
+        obj_type_name(runtime, a),
+        obj_type_name(runtime, b)
     );
     exit(1);
 }
@@ -831,8 +831,8 @@ inline Object* NgSub(Runtime* runtime, void* aa, void* bb) {
     // Unsupported types
     fprintf(stderr,
         "TypeError: unsupported operand type(s) for -: '%s' and '%s'\n",
-        obj_type_name(a),
-        obj_type_name(b)
+        obj_type_name(runtime, a),
+        obj_type_name(runtime, b)
     );
     exit(1);
 }
@@ -868,8 +868,8 @@ inline Object* NgMul(Runtime* runtime, void* aa, void* bb) {
     // Unsupported types
     fprintf(stderr,
         "TypeError: unsupported operand type(s) for *: '%s' and '%s'\n",
-        obj_type_name(a),
-        obj_type_name(b)
+        obj_type_name(runtime, a),
+        obj_type_name(runtime, b)
     );
     exit(1);
 }
@@ -914,8 +914,8 @@ inline Object* NgTrueDiv(Runtime* runtime, void* aa, void* bb) {
     // Unsupported types
     fprintf(stderr,
         "TypeError: unsupported operand type(s) for /: '%s' and '%s'\n",
-        obj_type_name(a),
-        obj_type_name(b)
+        obj_type_name(runtime, a),
+        obj_type_name(runtime, b)
     );
     exit(1);
 }
@@ -964,8 +964,8 @@ inline Object* NgFloorDiv(Runtime* runtime, void* aa, void* bb) {
     // Unsupported types
     fprintf(stderr,
         "TypeError: unsupported operand type(s) for //: '%s' and '%s'\n",
-        obj_type_name(a),
-        obj_type_name(b)
+        obj_type_name(runtime, a),
+        obj_type_name(runtime, b)
     );
     exit(1);
 }
@@ -1016,68 +1016,68 @@ inline Object* NgMod(Runtime* runtime, void* aa, void* bb) {
     // Unsupported types
     fprintf(stderr,
         "TypeError: unsupported operand type(s) for %%: '%s' and '%s'\n",
-        obj_type_name(a),
-        obj_type_name(b)
+        obj_type_name(runtime, a),
+        obj_type_name(runtime, b)
     );
     exit(1);
 }
 
-double _NgAsDouble(Object* obj) {
+double _NgAsDouble(Runtime* runtime, Object* obj) {
     if (obj->__flags__.type == OBJ_TYPE_INT) {
         return (double)((IntObject*)obj)->__value__;
     }
     if (obj->__flags__.type == OBJ_TYPE_FLOAT) {
         return ((FloatObject*)obj)->__value__;
     }
-    fprintf(stderr, "TypeError: unsupported operand type for comparison: '%s'\n", obj_type_name(obj));
+    fprintf(stderr, "TypeError: unsupported operand type for comparison: '%s'\n", obj_type_name(runtime, obj));
     exit(1);
 }
 
 Object* NgEq(Runtime* runtime, void* aa, void* bb) {
     Object* a = (Object*)aa;
     Object* b = (Object*)bb;
-    double va = _NgAsDouble(a);
-    double vb = _NgAsDouble(b);
+    double va = _NgAsDouble(runtime, a);
+    double vb = _NgAsDouble(runtime, b);
     return alloc_bool(runtime, va == vb);
 }
 
 Object* NgNeq(Runtime* runtime, void* aa, void* bb) {
     Object* a = (Object*)aa;
     Object* b = (Object*)bb;
-    double va = _NgAsDouble(a);
-    double vb = _NgAsDouble(b);
+    double va = _NgAsDouble(runtime, a);
+    double vb = _NgAsDouble(runtime, b);
     return alloc_bool(runtime, va != vb);
 }
 
 Object* NgLt(Runtime* runtime, void* aa, void* bb) {
     Object* a = (Object*)aa;
     Object* b = (Object*)bb;
-    double va = _NgAsDouble(a);
-    double vb = _NgAsDouble(b);
+    double va = _NgAsDouble(runtime, a);
+    double vb = _NgAsDouble(runtime, b);
     return alloc_bool(runtime, va < vb);
 }
 
 Object* NgLeq(Runtime* runtime, void* aa, void* bb) {
     Object* a = (Object*)aa;
     Object* b = (Object*)bb;
-    double va = _NgAsDouble(a);
-    double vb = _NgAsDouble(b);
+    double va = _NgAsDouble(runtime, a);
+    double vb = _NgAsDouble(runtime, b);
     return alloc_bool(runtime, va <= vb);
 }
 
 Object* NgGt(Runtime* runtime, void* aa, void* bb) {
     Object* a = (Object*)aa;
     Object* b = (Object*)bb;
-    double va = _NgAsDouble(a);
-    double vb = _NgAsDouble(b);
+    double va = _NgAsDouble(runtime, a);
+    double vb = _NgAsDouble(runtime, b);
     return alloc_bool(runtime, va > vb);
 }
 
 Object* NgGeq(Runtime* runtime, void* aa, void* bb) {
     Object* a = (Object*)aa;
     Object* b = (Object*)bb;
-    double va = _NgAsDouble(a);
-    double vb = _NgAsDouble(b);
+    double va = _NgAsDouble(runtime, a);
+    double vb = _NgAsDouble(runtime, b);
     return alloc_bool(runtime, va >= vb);
 }
 
@@ -1558,6 +1558,52 @@ Runtime* init_runtime() {
     return runtime;
 }
 
+Object* NgLen(Runtime* runtime, Tuple* args, Dict* kwargs) {
+    if (!args) {
+        fprintf(stderr, "TypeError: len() missing 1 required positional argument: 'obj'\n");
+        exit(1);
+    }
+    if (args->size < 1) {
+        fprintf(stderr, "TypeError: len() missing 1 required positional argument: 'obj'\n");
+        exit(1);
+    }
+
+    Object* obj = args->items[0];
+    size_t length = 0;
+
+    switch (obj->__flags__.type) {
+        case OBJ_TYPE_LIST: {
+            List* list = (List*)obj;
+            length = list->size;
+            break;
+        }
+        case OBJ_TYPE_TUPLE: {
+            Tuple* tuple = (Tuple*)obj;
+            length = tuple->size;
+            break;
+        }
+        case OBJ_TYPE_STRING: {
+            StringObject* str = (StringObject*)obj;
+            length = str->size;
+            break;
+        }
+        default: {
+            Object* len_method = NgGetMember(runtime, obj, runtime->builtin_names.__len__);
+            if (!len_method) {
+                fprintf(stderr, "TypeError: object of type '%s' has no len()\n", obj_type_name(runtime, obj));
+                exit(1);
+            }
+
+            Object* len_result = NgCall(runtime, len_method, INCREF(runtime, args), kwargs);
+            DECREF(runtime, len_method);
+            return len_result;
+        }
+    }
+
+    DECREF(runtime, obj);
+    return alloc_int(runtime, (int64_t) length);
+}
+
 Object* NgToString(Runtime* runtime, void* obj) {
     Object* o = (Object*)obj;
 
@@ -1580,7 +1626,7 @@ Object* NgToString(Runtime* runtime, void* obj) {
         case OBJ_TYPE_BYTES: {
             fprintf(stderr,
                 "TypeError: cannot convert '%s' to string\n",
-                obj_type_name(o)
+                obj_type_name(runtime, o)
             );
             exit(1);
         }
@@ -1665,7 +1711,7 @@ Object* NgToString(Runtime* runtime, void* obj) {
         default:
             fprintf(stderr,
                 "TypeError: cannot convert '%s' to string\n",
-                obj_type_name(o)
+                obj_type_name(runtime, o)
             );
             exit(1);
     }
@@ -2064,8 +2110,8 @@ Object* NgPow(Runtime* runtime, void* bb, void* ee) {
     // ---- unsupported types ----
     fprintf(stderr,
         "TypeError: unsupported operand type(s) for **: '%s' and '%s'\n",
-        obj_type_name(base),
-        obj_type_name(exp)
+        obj_type_name(runtime, base),
+        obj_type_name(runtime, exp)
     );
     exit(1);
 }
@@ -2536,15 +2582,6 @@ Object* alloc_list_prefill(Runtime* runtime, size_t size, Object** items) {
     return add_list_functions(runtime, list);
 }
 
-const char* obj_type_name(void* oo) {
-    Object* obj = (Object*)oo;
-    int32_t type = obj->__flags__.type;
-    if (type >= 0 && type < sizeof(obj_type_names) / sizeof(obj_type_names[0])) {
-        return obj_type_names[type];
-    }
-    return "unknown";
-}
-
 
 void* INCREF(Runtime* runtime, void* obj) {
     if (obj != NULL) {
@@ -2863,7 +2900,7 @@ Object* NgFormattedValue(Runtime* runtime, void* vv, void* ss)
     if (sspec->__flags__.type != OBJ_TYPE_STRING) {
         fprintf(stderr,
             "TypeError: format spec must be a string, not '%s'\n",
-            obj_type_name(sspec)
+            obj_type_name(runtime, sspec)
         );
         exit(1);
     }
@@ -2897,21 +2934,21 @@ double NgCastToFloat(Runtime* runtime, void* obj) {
                 if (result) DECREF(runtime, result);
                 fprintf(stderr,
                     "TypeError: __float__ method did not return a float (returned '%s')\n",
-                    obj_type_name(result)
+                    obj_type_name(runtime, result)
                 );
                 exit(1);
             }
         }
         fprintf(stderr,
             "TypeError: cannot cast type '%s' to float\n",
-            obj_type_name(o)
+            obj_type_name(runtime, o)
         );
         exit(1);
     }
 
     fprintf(stderr,
         "TypeError: cannot cast type '%s' to float\n",
-        obj_type_name(o)
+        obj_type_name(runtime, o)
     );
     exit(1);
 
@@ -2942,23 +2979,53 @@ int64_t NgCastToInt(Runtime* runtime, void* obj) {
                 if (result) DECREF(runtime, result);
                 fprintf(stderr,
                     "TypeError: __int__ method did not return an int (returned '%s')\n",
-                    obj_type_name(result)
+                    obj_type_name(runtime, result)
                 );
                 exit(1);
             }
         }
         fprintf(stderr,
             "TypeError: cannot cast type '%s' to int\n",
-            obj_type_name(o)
+            obj_type_name(runtime, o)
         );
         exit(1);
     }
 
     fprintf(stderr,
         "TypeError: cannot cast type '%s' to int\n",
-        obj_type_name(o)
+        obj_type_name(runtime, o)
     );
     exit(1);
 
     return 0;
+}
+
+const char* obj_type_name(Runtime* runtime, void* oo) {
+    Object* obj = (Object*)oo;
+    int32_t type = obj->__flags__.type;
+    switch (type) {
+        case OBJ_TYPE_INSTANCE: {
+            InstanceObject* inst = (InstanceObject*)obj;
+            Object* cls = NgGetMember(runtime, inst, runtime->builtin_names.__class__);
+            if (!cls) {
+                return "instance";
+            }
+            Object* class_name = NgGetMember(runtime, (InstanceObject*)cls, runtime->builtin_names.__typename__);
+            DECREF(runtime, cls);
+            if (!class_name) {
+                return "instance";
+            }
+
+            const char* class_name_str = NgToCString(runtime, class_name);
+            DECREF(runtime, class_name);
+            return class_name_str;
+        }
+        default:
+            break;
+    }
+
+    if (type >= 0 && type < sizeof(obj_type_names) / sizeof(obj_type_names[0])) {
+        return obj_type_names[type];
+    }
+    return "unknown";
 }

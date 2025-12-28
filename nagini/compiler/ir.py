@@ -327,7 +327,7 @@ class NaginiIR:
         """Register a class constant"""
         if str(class_info) in self.consts_dict:
             return self.consts_dict[str(class_info)]
-        class_name = class_info.name
+        
         ident = self.const_count
         self.consts[ident] = class_info
         self.const_count += 1

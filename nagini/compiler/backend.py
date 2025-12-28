@@ -75,6 +75,11 @@ class LLVMBackend:
         print("Generating C code from Nagini IR...")
         self.output_code = []
 
+        # Register all classes
+        for class_name, class_info in self.ir.classes.items():
+            self.ir.classes[class_name].name_id = self.ir.register_string_constant(class_name)
+            self.ir.register_class_constant(class_info)
+
         # Ensure commonly used loop constants exist before headers are emitted
         self._pre_register_loop_constants()
         
@@ -303,6 +308,12 @@ class LLVMBackend:
             self.output_code.append(f'    Object* self = alloc_instance(runtime);')
             self.output_code.append(f'    args = (Tuple*) NgPrependTuple(runtime, self, args);')
             self.output_code.append(f'    {class_info.name}___init__(runtime, args, kwargs);')
+            self.output_code.append(f'    /* Set class */')
+
+            # self.ir.classes[class_name].name_id = self.ir.register_string_constant(class_name)
+            # self.ir.register_class_constant(class_info)
+            self.output_code.append(f'    NgSetMember(runtime, self, runtime->builtin_names.__class__, runtime->constants[{self.ir.register_class_constant(class_info)}]);')
+
             for method in class_info.methods:
                 if method.name == '__init__' or method.is_static:
                     continue
@@ -1133,6 +1144,13 @@ class LLVMBackend:
                         return f'printf("{format_str}\\n", {", ".join(args_list)})'
                     else:
                         return 'printf("\\n")'
+                elif expr.func_name == 'len':
+                    # Map len() to NgLen
+                    if expr.args:
+                        arg_code = self._gen_expr(expr.args[0])
+                        return f'NgLen(runtime, (Tuple*) alloc_tuple(runtime, 1, (Object*[]) {{{arg_code}}}), NULL)'
+                    else:
+                        raise ValueError('len() requires one argument')
                 ident = fun_ids.get(expr.func_name)
                 if not ident:
                     ident = gen_uuid(16)
