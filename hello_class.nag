@@ -1,4 +1,4 @@
-@property(malloc_strategy='pool', layout='cpp', paradigm='object')
+@property(paradigm='object')
 class Vec3:
     x: float
     y: float
@@ -64,6 +64,19 @@ if __name__ == "__main__":
     print(f'list pop(): {lst.pop()}')
     print(lst)
     print(len(lst))
+    print('hello dict:')
+    d = {'one': 1, 'two': 2}
+    print(d)
+    d['three'] = 3
+    print(d)
+    print(f'dict two: {d["two"]}')
+    print(f'dict keys: {list(d.keys())}')
+    print(f'dict values: {list(d.values())}')
+    print('hello nested data structures:')
+    nested = {'vec': v, 'list': lst, 'dict': d}
+    print(nested)
+    nested.pop('vec')
+    print(nested)
     # with nexc('cpu') as optim: # or gpu
     #     array = optim.array(300, type=optim.fp32)
     #     for i in range(100):
