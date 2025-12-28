@@ -14,22 +14,26 @@ class Vec3:
     def __str__(self) -> str:
         # return "vec"
         return f"Vec3({self.x:.2f}, {self.y:.2f}, {self.z:.2f})"
+    def __len__(self) -> int:
+        return self.magnitude()
 
 def fibonacci(n: int):
-    a = 0
-    b = 1
+    a, b = 0, 1
     for _ in range(n):
         print(f'ib step: a={a}, b={b}')
-        temp = a      # save old a
-        a = b         # update a to previous b
-        b = temp + b  # update b to old a + old b
+        a, b = b, a + b
     return a
 
 if __name__ == "__main__":
+    print("hello fib!")
     print(fibonacci(10))
+    print("hello vec3!")
     v = Vec3(1.0, 2.0, 3.0)
+    print('hello member methods:')
     print(v.magnitude())
     print(v)
+    print(len(v))
+    print('hello loops:')
     total = 0
     for i in range(5):
         total += 5
@@ -38,6 +42,28 @@ if __name__ == "__main__":
     while i < 3:
         print(i)
         i = i + 1
+    print('hello tuples:')
+    x = (10, 2, 'text')
+    print(x)
+    print(x[2])
+    print('hello list:')
+    lst = [1, 2, 3, 4]
+    print(lst)
+    lst.append(5)
+    print(lst)
+    lst2 = [7, 2]
+    lst.extend(lst2)
+    print(lst)
+    print(f'list find 3: {lst.index(3)}')
+    print(f'list erase 2:')
+    lst.remove(2)
+    print(lst)
+    print(f'list find 7: {lst.index(7)}')
+    print(f'list pop(4): {lst.pop(4)}')
+    print(lst)
+    print(f'list pop(): {lst.pop()}')
+    print(lst)
+    print(len(lst))
     # with nexc('cpu') as optim: # or gpu
     #     array = optim.array(300, type=optim.fp32)
     #     for i in range(100):

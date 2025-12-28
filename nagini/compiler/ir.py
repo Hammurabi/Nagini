@@ -79,6 +79,31 @@ class SubscriptIR(ExprIR):
     obj: ExprIR
     index: ExprIR
 
+
+@dataclass
+class SliceIR(ExprIR):
+    """Slice expression (start:stop:step)"""
+    start: Optional[ExprIR]
+    stop: Optional[ExprIR]
+    step: Optional[ExprIR]
+
+
+@dataclass
+class TupleIR(ExprIR):
+    """Tuple literal"""
+    elements: List[ExprIR]
+
+@dataclass
+class ListIR(ExprIR):
+    """List literal"""
+    elements: List[ExprIR]
+
+@dataclass
+class DictIR(ExprIR):
+    """Dictionary literal"""
+    keys: List[ExprIR]
+    values: List[ExprIR]
+
 @dataclass
 class JoinedStrIR(ExprIR):
     """Joined string (f-string)"""
@@ -140,6 +165,12 @@ class SubscriptAssignIR(StmtIR):
     obj: ExprIR
     index: ExprIR
     value: ExprIR
+
+
+@dataclass
+class MultiAssignIR(StmtIR):
+    """Multiple assignments produced by tuple unpacking"""
+    assignments: List[AssignIR]
 
 
 @dataclass
@@ -223,11 +254,12 @@ class NaginiIR:
         self.const_count = 0
         self.consts = {}
         self.consts_dict = {}
+        self.temp_counter = 0
         
         # Cache for converted methods to avoid double conversion
         self.method_ir_cache = {}
 
-    def register_string_constant(self, value: str) -> str:
+    def register_string_constant(self, value: str) -> int:
         """Register a string constant and return its unique name"""
         # Use tuple key (type, value) to ensure strings don't collide with other types
         key = ('str', value)
@@ -239,7 +271,7 @@ class NaginiIR:
         self.consts_dict[key] = ident
         return ident
     
-    def register_int_constant(self, value: int) -> str:
+    def register_int_constant(self, value: int) -> int:
         """Register an integer constant and return its unique name"""
         # Use tuple key (type, value) to avoid collision between int and float
         # e.g., 2 (int) and 2.0 (float) should be different constants
@@ -252,7 +284,7 @@ class NaginiIR:
         self.consts_dict[key] = ident
         return ident
     
-    def register_float_constant(self, value: float) -> str:
+    def register_float_constant(self, value: float) -> int:
         """Register a float constant and return its unique name"""
         # Use tuple key (type, value) to avoid collision between int and float
         # e.g., 2 (int) and 2.0 (float) should be different constants
@@ -265,7 +297,7 @@ class NaginiIR:
         self.consts_dict[key] = ident
         return ident
     
-    def register_bytes_constant(self, value: bytes) -> str:
+    def register_bytes_constant(self, value: bytes) -> int:
         """Register a bytes constant and return its unique name"""
         # Use tuple key (type, value) to avoid collision with strings
         # Bytes and str objects can have similar representations
@@ -278,7 +310,7 @@ class NaginiIR:
         self.consts_dict[key] = ident
         return ident
     
-    def register_bool_constant(self, value: int) -> str:
+    def register_bool_constant(self, value: int) -> int:
         """Register a boolean constant and return its unique name"""
         # Use tuple key (type, value) to avoid collision with int
         # e.g., 0 (int) and False (bool) should be different constants
@@ -295,7 +327,7 @@ class NaginiIR:
         """Register a class constant"""
         if str(class_info) in self.consts_dict:
             return self.consts_dict[str(class_info)]
-        class_name = class_info.name
+        
         ident = self.const_count
         self.consts[ident] = class_info
         self.const_count += 1
@@ -427,7 +459,9 @@ class NaginiIR:
                         val = self._convert_expr_to_ir(stmt.value)
                         return AssignIR(tgt, val)
                     elif isinstance(target, ast.Tuple):
-                        raise NotImplementedError("Tuple unpacking in assignments is not supported yet.")
+                        value_ir = self._convert_expr_to_ir(stmt.value)
+                        assignments = self._create_tuple_assignments(target, stmt.value, value_ir)
+                        return MultiAssignIR(assignments)
                     elif isinstance(target, ast.Subscript):
                         # Subscript assignment (e.g., array[i] = value)
                         obj_ir = self._convert_expr_to_ir(target.value)
@@ -560,6 +594,10 @@ class NaginiIR:
             right = self._convert_expr_to_ir(expr.right)
             op = self._binop_to_str(expr.op)
             return BinOpIR(left, op, right)
+
+        elif isinstance(expr, ast.Tuple):
+            elements = [self._convert_expr_to_ir(e) for e in expr.elts]
+            return TupleIR(elements)
         
         elif isinstance(expr, ast.AugAssign):
             # Augmented assignment (e.g., x += 1)
@@ -654,6 +692,12 @@ class NaginiIR:
             obj = self._convert_expr_to_ir(expr.value)
             index = self._convert_expr_to_ir(expr.slice)
             return SubscriptIR(obj, index)
+
+        elif isinstance(expr, ast.Slice):
+            start = self._convert_expr_to_ir(expr.lower) if expr.lower else None
+            stop = self._convert_expr_to_ir(expr.upper) if expr.upper else None
+            step = self._convert_expr_to_ir(expr.step) if expr.step else None
+            return SliceIR(start, stop, step)
         
         elif isinstance(expr, ast.JoinedStr):
             # f-string (JoinedStr)
@@ -685,9 +729,66 @@ class NaginiIR:
 
             return FormattedValueIR(value_ir, format_spec_ir)
         
+        elif isinstance(expr, ast.List):
+            # List literal
+            elements = [self._convert_expr_to_ir(e) for e in expr.elts]
+            return ListIR(elements)
+        
         # Return a placeholder for unsupported expressions
         # TODO: Add better error handling or warnings for unsupported expression types
         raise NotImplementedError(f"Expression type {type(expr)} not supported in IR conversion.")
+    
+    def _create_tuple_assignments(self, target_tuple: ast.Tuple, value_node: ast.AST, value_expr: ExprIR, value_pre_evaluated: bool = False) -> List[AssignIR]:
+        """Create AssignIR list for tuple unpacking."""
+        assignments: List[AssignIR] = []
+        value_elts = value_node.elts if isinstance(value_node, ast.Tuple) else None
+        value_len = len(value_elts) if value_elts is not None else None
+        star_index = next((i for i, e in enumerate(target_tuple.elts) if isinstance(e, ast.Starred)), None)
+        total_targets = len(target_tuple.elts)
+        staged_targets = []
+
+        for idx, elt in enumerate(target_tuple.elts):
+            source_index = idx
+            if star_index is not None and idx > star_index:
+                if value_len is not None:
+                    source_index = value_len - (total_targets - idx)
+                else:
+                    source_index = idx
+
+            source_node = value_elts[source_index] if value_elts and source_index < len(value_elts) else None
+            if isinstance(elt, ast.Starred) and isinstance(elt.value, ast.Name):
+                # Starred target gets the remaining slice from current position
+                start_const = ConstantIR(self.register_int_constant(idx), 'int')
+                stop_expr = None
+                if value_len is not None:
+                    remaining_after = total_targets - idx - 1
+                    stop_index = value_len - remaining_after
+                    stop_expr = ConstantIR(self.register_int_constant(stop_index), 'int')
+                slice_ir = SliceIR(start_const, stop_expr, None)
+                source_expr = SubscriptIR(value_expr, slice_ir)
+            else:
+                if value_pre_evaluated or source_node is None:
+                    index_ir = ConstantIR(self.register_int_constant(source_index), 'int')
+                    source_expr = SubscriptIR(value_expr, index_ir)
+                else:
+                    source_expr = self._convert_expr_to_ir(source_node)
+
+            tmp_name = f"__tmp_unpack_{self.temp_counter}"
+            self.temp_counter += 1
+            tmp_var = VariableIR(tmp_name)
+            assignments.append(AssignIR(tmp_name, source_expr))
+            staged_targets.append((elt, source_node, tmp_var))
+
+        for elt, source_node, tmp_var in staged_targets:
+            if isinstance(elt, ast.Name):
+                assignments.append(AssignIR(elt.id, tmp_var))
+            elif isinstance(elt, ast.Tuple):
+                nested_value_node = source_node if isinstance(source_node, ast.Tuple) else None
+                assignments.extend(self._create_tuple_assignments(elt, nested_value_node, tmp_var, True))
+            elif isinstance(elt, ast.Starred) and isinstance(elt.value, ast.Name):
+                assignments.append(AssignIR(elt.value.id, tmp_var))
+            # Ignore unsupported target types (e.g., attributes or subscripts) for now
+        return assignments
     
     def _extract_type_name(self, annotation) -> str:
         """Extract type name from annotation (helper for lambda)"""

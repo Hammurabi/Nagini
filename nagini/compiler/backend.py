@@ -15,8 +15,11 @@ from .ir import (
     ConstantIR, VariableIR, BinOpIR, UnaryOpIR, CallIR, AttributeIR,
     AssignIR, SubscriptAssignIR, ReturnIR, IfIR, WhileIR, ForIR, ExprStmtIR, WithIR,
     ConstructorCallIR, LambdaIR, BoxIR, UnboxIR, SubscriptIR,
-    SetAttrIR, JoinedStrIR, FormattedValueIR, AugAssignIR
+    SetAttrIR, JoinedStrIR, FormattedValueIR, AugAssignIR, MultiAssignIR, SliceIR,
+    TupleIR, ListIR, DictIR
 )
+
+fun_ids = {}
 
 def parse_func_call_args_kwargs(self, expr):
     num_args = len(expr.args)
@@ -36,7 +39,7 @@ def parse_func_call_args_kwargs(self, expr):
     atuple = f'alloc_tuple(runtime, {num_args}, (Object*[]) {{{args_code}}})' if num_args > 0 else 'NULL'
     return atuple, 'NULL'  # kwargs not implemented yet
 
-def gen_uuid(length=8):
+def gen_uuid(length=16):
     characters = string.ascii_letters + string.digits  # a-z, A-Z, 0-9
     return ''.join(secrets.choice(characters) for _ in range(length))
 
@@ -72,6 +75,11 @@ class LLVMBackend:
         print("Generating C code from Nagini IR...")
         self.output_code = []
 
+        # Register all classes
+        for class_name, class_info in self.ir.classes.items():
+            self.ir.classes[class_name].name_id = self.ir.register_string_constant(class_name)
+            self.ir.register_class_constant(class_info)
+
         # Ensure commonly used loop constants exist before headers are emitted
         self._pre_register_loop_constants()
         
@@ -99,6 +107,12 @@ class LLVMBackend:
         
         # Generate functions
         for func in self.ir.functions:
+            if func.name != 'main':
+                ident = fun_ids.get(func.name)
+                if ident is None:
+                    ident = gen_uuid(16)
+                    fun_ids[func.name] = ident
+                func.name = f'{func.name}_{ident}'
             self._gen_function(func)
 
         
@@ -258,6 +272,14 @@ class LLVMBackend:
         self.output_code.append('    }')
         self.output_code.append('}')
         self.output_code.append('')
+
+        # Basic slice helper (placeholder for future full implementation)
+        self.output_code.append('Object* NgSlice(Runtime* runtime, void* obj, void* start, void* stop, void* step) {')
+        self.output_code.append('    (void)runtime; (void)obj; (void)start; (void)stop; (void)step;')
+        self.output_code.append('    /* TODO: Implement slicing semantics */')
+        self.output_code.append('    return (Object*)obj;')
+        self.output_code.append('}')
+        self.output_code.append('')
     
     def _gen_class_struct(self, class_info: ClassInfo):
         """Generate C struct for a Nagini class using hash table for members"""
@@ -286,6 +308,12 @@ class LLVMBackend:
             self.output_code.append(f'    Object* self = alloc_instance(runtime);')
             self.output_code.append(f'    args = (Tuple*) NgPrependTuple(runtime, self, args);')
             self.output_code.append(f'    {class_info.name}___init__(runtime, args, kwargs);')
+            self.output_code.append(f'    /* Set class */')
+
+            # self.ir.classes[class_name].name_id = self.ir.register_string_constant(class_name)
+            # self.ir.register_class_constant(class_info)
+            self.output_code.append(f'    NgSetMember(runtime, self, runtime->builtin_names.__class__, runtime->constants[{self.ir.register_class_constant(class_info)}]);')
+
             for method in class_info.methods:
                 if method.name == '__init__' or method.is_static:
                     continue
@@ -527,6 +555,9 @@ class LLVMBackend:
             value_code = self._gen_expr(stmt.value)
             result.append(f'{ind}NgSetItem(runtime, {obj_code}, {index_code}, {value_code});')
 
+        elif isinstance(stmt, MultiAssignIR):
+            result.extend(self._emit_multi_assign(stmt, indent, self._gen_stmt))
+
         elif isinstance(stmt, AssignIR):
             # Variable assignment
             expr_code = self._gen_expr(stmt.value)
@@ -689,6 +720,10 @@ class LLVMBackend:
             value_code = self._gen_nexc_expr(stmt.value, nexc_arrays)
             result.append(f'{ind}{obj_code}[{index_code}] = {value_code};')
             return result
+
+        elif isinstance(stmt, MultiAssignIR):
+            result.extend(self._emit_multi_assign(stmt, indent, lambda s, i: self._gen_nexc_stmt(s, i, nexc_arrays, context_var)))
+            return result
         
         elif isinstance(stmt, AssignIR):
             # Check if this is a native array allocation
@@ -797,6 +832,13 @@ class LLVMBackend:
         # Fallback: generate standard statement
         result.extend(self._gen_stmt(stmt, indent))
         return result
+
+    def _emit_multi_assign(self, stmt: MultiAssignIR, indent: int, emitter) -> list:
+        """Helper to expand MultiAssignIR using provided emitter."""
+        expanded = []
+        for assign_stmt in stmt.assignments:
+            expanded.extend(emitter(assign_stmt, indent))
+        return expanded
     
     def _gen_nexc_expr(self, expr: ExprIR, nexc_arrays: dict) -> str:
         """Generate native C expression for nexc block"""
@@ -998,6 +1040,18 @@ class LLVMBackend:
         elif isinstance(expr, VariableIR):
             # Variable reference
             return expr.name
+
+        elif isinstance(expr, TupleIR):
+            elements_code = [self._gen_expr(e) for e in expr.elements]
+            if elements_code:
+                return f'alloc_tuple(runtime, {len(elements_code)}, (Object*[]) {{{", ".join(elements_code)}}})'
+            return 'alloc_tuple(runtime, 0, NULL)'
+        
+        elif isinstance(expr, ListIR):
+            elements_code = [self._gen_expr(e) for e in expr.elements]
+            if elements_code:
+                return f'alloc_list_prefill(runtime, {len(elements_code)}, (Object*[]) {{{", ".join(elements_code)}}})'
+            return 'alloc_list(runtime)'
         
         elif isinstance(expr, BinOpIR):
             # Binary operation
@@ -1090,8 +1144,18 @@ class LLVMBackend:
                         return f'printf("{format_str}\\n", {", ".join(args_list)})'
                     else:
                         return 'printf("\\n")'
-                
-                return f'{expr.func_name}(runtime, (Tuple*){tup}, (Dict*){kwa})'
+                elif expr.func_name == 'len':
+                    # Map len() to NgLen
+                    if expr.args:
+                        arg_code = self._gen_expr(expr.args[0])
+                        return f'NgLen(runtime, (Tuple*) alloc_tuple(runtime, 1, (Object*[]) {{{arg_code}}}), NULL)'
+                    else:
+                        raise ValueError('len() requires one argument')
+                ident = fun_ids.get(expr.func_name)
+                if not ident:
+                    ident = gen_uuid(16)
+                    fun_ids[expr.func_name] = ident
+                return f'{expr.func_name}_{ident}(runtime, (Tuple*){tup}, (Dict*){kwa})'
         
         elif isinstance(expr, AttributeIR):
             # Member access
@@ -1108,8 +1172,13 @@ class LLVMBackend:
         elif isinstance(expr, SubscriptIR):
             # Subscript access (obj[index])
             obj_code = self._gen_expr(expr.obj)
+            if isinstance(expr.index, SliceIR):
+                start_code = self._gen_expr(expr.index.start) if expr.index.start else 'NULL'
+                stop_code = self._gen_expr(expr.index.stop) if expr.index.stop else 'NULL'
+                step_code = self._gen_expr(expr.index.step) if expr.index.step else 'NULL'
+                return f'NgSlice(runtime, {obj_code}, {start_code}, {stop_code}, {step_code})'
             index_code = self._gen_expr(expr.index)
-            return f'{obj_code}[{index_code}]'
+            return f'NgGetItem(runtime, {obj_code}, {index_code})'
         
         elif isinstance(expr, ConstructorCallIR): # TODO:
             # Constructor call (ClassName(...))
