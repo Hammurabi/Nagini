@@ -657,7 +657,23 @@ class LLVMBackend:
                 result.append(f'{ind}}}')
             else:
                 iter_code = self._gen_expr(stmt.iter_expr)
-                result.append(f'{ind}/* For loop: for {stmt.target} in {iter_code} (unsupported iterator) */')
+                if stmt.target not in self.declared_vars:
+                    result.append(f'{ind}Object* {stmt.target} = NULL;')
+                    self.declared_vars.add(stmt.target)
+                temp_id = gen_uuid(16)
+                result.append(f'{ind}{{')
+                result.append(f'{ind}    Object* __iter_{temp_id} = NgIter(runtime, {iter_code});')
+                result.append(f'{ind}    while (1) {{')
+                result.append(f'{ind}        Object* __next_{temp_id} = NgIterNext(runtime, __iter_{temp_id});')
+                result.append(f'{ind}        if (!__next_{temp_id}) break;')
+                result.append(f'{ind}        if ({stmt.target}) DECREF(runtime, {stmt.target});')
+                result.append(f'{ind}        {stmt.target} = __next_{temp_id};')
+                for body_stmt in stmt.body:
+                    result.extend(self._gen_stmt(body_stmt, indent + 2))
+                result.append(f'{ind}    }}')
+                result.append(f'{ind}    if ({stmt.target}) {{ DECREF(runtime, {stmt.target}); {stmt.target} = NULL; }}')
+                result.append(f'{ind}    if (__iter_{temp_id}) DECREF(runtime, __iter_{temp_id});')
+                result.append(f'{ind}}}')
         
         elif isinstance(stmt, ExprStmtIR):
             # Expression statement (e.g., function call)
@@ -1053,6 +1069,13 @@ class LLVMBackend:
                 return f'alloc_list_prefill(runtime, {len(elements_code)}, (Object*[]) {{{", ".join(elements_code)}}})'
             return 'alloc_list(runtime)'
         
+        elif isinstance(expr, DictIR):
+            keys_code = [self._gen_expr(k) for k in expr.keys]
+            values_code = [self._gen_expr(v) for v in expr.values]
+            if keys_code:
+                return f'NgBuildDict(runtime, {len(keys_code)}, (Object*[]) {{{", ".join(keys_code)}}}, (Object*[]) {{{", ".join(values_code)}}})'
+            return 'alloc_dict(runtime)'
+        
         elif isinstance(expr, BinOpIR):
             # Binary operation
             left_code = self._gen_expr(expr.left)
@@ -1079,6 +1102,8 @@ class LLVMBackend:
                 '>=': 'NgGeq',
                 'and': 'NgAnd',
                 'or': 'NgOr',
+                'in': 'NgContains',
+                'not in': 'NgNotContains',
             }
             
             if expr.op == '**':
@@ -1151,6 +1176,16 @@ class LLVMBackend:
                         return f'NgLen(runtime, (Tuple*) alloc_tuple(runtime, 1, (Object*[]) {{{arg_code}}}), NULL)'
                     else:
                         raise ValueError('len() requires one argument')
+                elif expr.func_name == 'list':
+                    if expr.args:
+                        arg_code = self._gen_expr(expr.args[0])
+                        return f'NgListFromIterable(runtime, {arg_code})'
+                    return 'alloc_list(runtime)'
+                elif expr.func_name == 'dict':
+                    if expr.args:
+                        arg_code = self._gen_expr(expr.args[0])
+                        return f'NgDictFromIterable(runtime, {arg_code})'
+                    return 'alloc_dict(runtime)'
                 ident = fun_ids.get(expr.func_name)
                 if not ident:
                     ident = gen_uuid(16)
