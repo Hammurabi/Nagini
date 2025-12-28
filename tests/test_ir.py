@@ -8,6 +8,7 @@ from nagini.compiler.ir import (
     SliceIR,
     SubscriptIR,
     SubscriptAssignIR,
+    SetIR,
     VariableIR,
 )
 
@@ -54,6 +55,12 @@ class IRGenerationTests(unittest.TestCase):
         self.assertIsInstance(assigns[3].value, VariableIR)
         self.assertTrue(assigns[2].value.name.startswith("__tmp_unpack_"))
         self.assertTrue(assigns[3].value.name.startswith("__tmp_unpack_"))
+
+    def test_set_literal_ir(self):
+        body = self._main_body("s = {1, 2, 3}")
+        self.assertIsInstance(body[0], AssignIR)
+        self.assertIsInstance(body[0].value, SetIR)
+        self.assertEqual(len(body[0].value.elements), 3)
 
 
 if __name__ == "__main__":

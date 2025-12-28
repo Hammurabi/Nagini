@@ -27,6 +27,20 @@ class BackendSubscriptTests(unittest.TestCase):
         )
         self.assertIn("NgSetItem(runtime, arr, runtime->constants[", code)
 
+    def test_set_literal_generates_helper(self):
+        code = self._generate_code(
+            "def main():\n"
+            "    s = {1, 2}\n"
+        )
+        self.assertIn("NgBuildSet(runtime, 2", code)
+
+    def test_set_builtin_empty(self):
+        code = self._generate_code(
+            "def main():\n"
+            "    s = set()\n"
+        )
+        self.assertIn("alloc_set(runtime)", code)
+
 
 if __name__ == "__main__":
     unittest.main()
