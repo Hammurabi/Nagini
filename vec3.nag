@@ -1,0 +1,17 @@
+@property(paradigm='object')
+class Vec3:
+    x: float
+    y: float
+    z: float
+    
+    def __init__(self, x: float, y: float, z: float):
+        self.x = x
+        self.y = y
+        self.z = z
+    
+    def magnitude(self) -> float:
+        return (self.x**2 + self.y**2 + self.z**2) ** 0.5
+    
+    def __str__(self) -> str:
+        return f"Vec3({self.x:.2f}, {self.y:.2f}, {self.z:.2f})"
+

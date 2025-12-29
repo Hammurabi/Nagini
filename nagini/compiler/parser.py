@@ -18,7 +18,9 @@ parser, allowing rapid development and leveraging Python's robust parsing capabi
 """
 
 import ast
-from typing import Dict, List, Optional, Any
+import os
+from pathlib import Path
+from typing import Dict, List, Optional, Any, Set
 from dataclasses import dataclass, field
 
 
@@ -106,10 +108,12 @@ class NaginiParser:
         'str': 8,      # Pointer size (char* in C)
     }
     
-    def __init__(self):
+    def __init__(self, source_file: Optional[str] = None):
         self.classes: Dict[str, ClassInfo] = {}
         self.functions: Dict[str, FunctionInfo] = {}
         self.top_level_stmts: List[ast.stmt] = []
+        self.source_file = source_file
+        self.imported_files: Set[str] = set()  # Track imported files to avoid circular imports
         
     def parse(self, source_code: str) -> tuple[Dict[str, ClassInfo], Dict[str, FunctionInfo], List[ast.stmt]]:
         """
@@ -136,7 +140,10 @@ class NaginiParser:
         
         # Walk only top-level nodes (we don't use ast.walk to avoid nested functions)
         for node in tree.body:
-            if isinstance(node, ast.ClassDef):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                # Handle import statements
+                self._handle_import(node)
+            elif isinstance(node, ast.ClassDef):
                 # Extract class definition
                 class_info = self._parse_class(node)
                 self.classes[class_info.name] = class_info
@@ -349,3 +356,117 @@ class NaginiParser:
             # Check if function has @staticmethod decorator
             is_static=any(isinstance(deco, ast.Name) and deco.id == 'staticmethod' for deco in node.decorator_list)
         )
+    
+    def _handle_import(self, node):
+        """
+        Handle import and from...import statements.
+        
+        Resolves the module file path and parses it to import classes and functions.
+        Search order:
+        1. Local directory (same as source file) - looks for .nag files
+        2. compiler/ng directory - looks for .ng files
+        
+        Args:
+            node: ast.Import or ast.ImportFrom node
+        """
+        if isinstance(node, ast.Import):
+            # Handle: import module_name
+            for alias in node.names:
+                module_name = alias.name
+                self._import_module(module_name)
+        elif isinstance(node, ast.ImportFrom):
+            # Handle: from module_name import name1, name2
+            module_name = node.module
+            if module_name:
+                self._import_module(module_name, from_names=[alias.name for alias in node.names])
+    
+    def _import_module(self, module_name: str, from_names: Optional[List[str]] = None):
+        """
+        Import a module by resolving its file path and parsing it.
+        
+        Args:
+            module_name: Name of the module to import (e.g., 'vec3', 'builtin')
+            from_names: Optional list of specific names to import (for 'from X import Y' syntax)
+        """
+        # Resolve the module file path
+        module_path = self._resolve_module_path(module_name)
+        
+        if not module_path:
+            # Module not found - this is not an error for now, as it might be a Python built-in
+            # or external module that doesn't need Nagini compilation
+            return
+        
+        # Check if already imported to avoid circular imports
+        if module_path in self.imported_files:
+            return
+        
+        # Mark as imported
+        self.imported_files.add(module_path)
+        
+        # Read and parse the imported file
+        try:
+            with open(module_path, 'r') as f:
+                imported_source = f.read()
+        except Exception as e:
+            print(f"Warning: Could not read import file '{module_path}': {e}")
+            return
+        
+        # Create a new parser for the imported file
+        imported_parser = NaginiParser(source_file=str(module_path))
+        imported_parser.imported_files = self.imported_files  # Share the imported files set
+        
+        try:
+            imported_classes, imported_functions, _ = imported_parser.parse(imported_source)
+            
+            # Merge imported classes and functions into current parser
+            # If from_names is specified, only import those specific names
+            if from_names:
+                # Import only specified names
+                for name in from_names:
+                    if name in imported_classes:
+                        self.classes[name] = imported_classes[name]
+                    elif name in imported_functions:
+                        self.functions[name] = imported_functions[name]
+            else:
+                # Import all classes and functions from the module
+                self.classes.update(imported_classes)
+                self.functions.update(imported_functions)
+        except Exception as e:
+            print(f"Warning: Could not parse import file '{module_path}': {e}")
+    
+    def _resolve_module_path(self, module_name: str) -> Optional[str]:
+        """
+        Resolve a module name to a file path.
+        
+        Search order:
+        1. Look for {module_name}.nag in the same directory as source file
+        2. Look for {module_name}.ng in compiler/ng directory
+        
+        Args:
+            module_name: Name of the module (e.g., 'vec3', 'builtin')
+            
+        Returns:
+            Absolute path to the module file, or None if not found
+        """
+        # Determine the source directory
+        if self.source_file:
+            source_dir = Path(self.source_file).parent.absolute()
+        else:
+            source_dir = Path.cwd()
+        
+        # First, search locally for .nag files
+        local_path = source_dir / f"{module_name}.nag"
+        if local_path.exists() and local_path.is_file():
+            return str(local_path.absolute())
+        
+        # Second, search in compiler/ng directory for .ng files
+        # Get the compiler package directory
+        compiler_dir = Path(__file__).parent
+        ng_dir = compiler_dir / 'ng'
+        ng_path = ng_dir / f"{module_name}.ng"
+        
+        if ng_path.exists() and ng_path.is_file():
+            return str(ng_path.absolute())
+        
+        # Module not found
+        return None

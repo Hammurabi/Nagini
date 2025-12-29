@@ -63,7 +63,7 @@ def compile_file(input_file: str, output_file: str = None, emit_c: bool = False,
     # Use Python's AST parser to extract class and function definitions
     if verbose:
         print("Phase 1: Parsing AST...")
-    parser = NaginiParser()
+    parser = NaginiParser(source_file=input_file)
     classes, functions, top_level_stmts = parser.parse(source_code)
     
     if verbose:
