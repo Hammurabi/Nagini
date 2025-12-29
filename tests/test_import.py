@@ -1,6 +1,7 @@
 import unittest
 import tempfile
 import os
+import shutil
 from pathlib import Path
 
 from nagini.compiler import NaginiParser
@@ -15,7 +16,6 @@ class ImportTests(unittest.TestCase):
         
     def tearDown(self):
         """Clean up temporary files."""
-        import shutil
         if os.path.exists(self.test_dir):
             shutil.rmtree(self.test_dir)
     

@@ -20,7 +20,7 @@ parser, allowing rapid development and leveraging Python's robust parsing capabi
 import ast
 import os
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Set
+from typing import Dict, List, Optional, Any, Set, Union
 from dataclasses import dataclass, field
 
 
@@ -109,6 +109,13 @@ class NaginiParser:
     }
     
     def __init__(self, source_file: Optional[str] = None):
+        """
+        Initialize the Nagini parser.
+        
+        Args:
+            source_file: Optional path to the source file being parsed. 
+                        Used for resolving import statements relative to the source file location.
+        """
         self.classes: Dict[str, ClassInfo] = {}
         self.functions: Dict[str, FunctionInfo] = {}
         self.top_level_stmts: List[ast.stmt] = []
@@ -357,7 +364,7 @@ class NaginiParser:
             is_static=any(isinstance(deco, ast.Name) and deco.id == 'staticmethod' for deco in node.decorator_list)
         )
     
-    def _handle_import(self, node):
+    def _handle_import(self, node: Union[ast.Import, ast.ImportFrom]):
         """
         Handle import and from...import statements.
         
@@ -427,6 +434,9 @@ class NaginiParser:
                         self.classes[name] = imported_classes[name]
                     elif name in imported_functions:
                         self.functions[name] = imported_functions[name]
+                    else:
+                        # Warn if the requested name is not found
+                        print(f"Warning: Name '{name}' not found in module '{module_path}'")
             else:
                 # Import all classes and functions from the module
                 self.classes.update(imported_classes)
