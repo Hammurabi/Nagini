@@ -375,6 +375,12 @@ class NaginiParser:
         
         Args:
             node: ast.Import or ast.ImportFrom node
+            
+        Note:
+            This method handles file I/O and parsing errors gracefully by issuing warnings
+            rather than raising exceptions. Missing modules or parse errors will not halt
+            compilation, which allows for importing Python built-ins or external modules
+            that don't require Nagini compilation.
         """
         if isinstance(node, ast.Import):
             # Handle: import module_name
@@ -414,7 +420,7 @@ class NaginiParser:
         try:
             with open(module_path, 'r') as f:
                 imported_source = f.read()
-        except Exception as e:
+        except (FileNotFoundError, PermissionError, IOError) as e:
             print(f"Warning: Could not read import file '{module_path}': {e}")
             return
         
@@ -441,7 +447,7 @@ class NaginiParser:
                 # Import all classes and functions from the module
                 self.classes.update(imported_classes)
                 self.functions.update(imported_functions)
-        except Exception as e:
+        except (SyntaxError, ValueError) as e:
             print(f"Warning: Could not parse import file '{module_path}': {e}")
     
     def _resolve_module_path(self, module_name: str) -> Optional[str]:
