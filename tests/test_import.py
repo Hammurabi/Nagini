@@ -2,6 +2,7 @@ import unittest
 import tempfile
 import os
 import shutil
+import ast
 from pathlib import Path
 
 from nagini.compiler import NaginiParser
@@ -139,6 +140,31 @@ class ClassB:
         # Classes and functions should be empty (module not found)
         self.assertEqual(len(classes), 0)
         self.assertEqual(len(functions), 0)
+    
+    def test_import_with_alias(self):
+        """Test importing a module with an alias."""
+        # Create a module file
+        module_path = Path(self.test_dir) / "mymodule.nag"
+        module_path.write_text("""
+def my_function(x: int) -> int:
+    return x * 2
+""")
+        
+        # Create a source file that imports with an alias
+        source_path = Path(self.test_dir) / "main.nag"
+        source_code = "import mymodule as mm\n"
+        
+        # Parse the source
+        parser = NaginiParser(source_file=str(source_path))
+        classes, functions, top_level_stmts = parser.parse(source_code)
+        
+        # Verify that the function was imported
+        self.assertIn('my_function', functions)
+        
+        # Verify that an alias assignment was created
+        self.assertEqual(len(top_level_stmts), 1)
+        self.assertIsInstance(top_level_stmts[0], ast.Assign)
+        self.assertEqual(top_level_stmts[0].targets[0].id, 'mm')
 
 
 if __name__ == "__main__":

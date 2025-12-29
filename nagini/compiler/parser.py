@@ -383,23 +383,39 @@ class NaginiParser:
             that don't require Nagini compilation.
         """
         if isinstance(node, ast.Import):
-            # Handle: import module_name
+            # Handle: import module_name [as alias]
             for alias in node.names:
                 module_name = alias.name
-                self._import_module(module_name)
+                alias_name = alias.asname if alias.asname else None
+                
+                # Import the module contents
+                module_imported = self._import_module(module_name)
+                
+                # If an alias is used (e.g., import os as o), create a module reference
+                if alias_name and module_imported:
+                    # Create an assignment: alias = "<module_name>"
+                    # This allows the alias to be referenced in code (e.g., print(o))
+                    assign_node = ast.Assign(
+                        targets=[ast.Name(id=alias_name, ctx=ast.Store())],
+                        value=ast.Constant(value=f"<module '{module_name}'>")
+                    )
+                    self.top_level_stmts.append(assign_node)
         elif isinstance(node, ast.ImportFrom):
             # Handle: from module_name import name1, name2
             module_name = node.module
             if module_name:
                 self._import_module(module_name, from_names=[alias.name for alias in node.names])
     
-    def _import_module(self, module_name: str, from_names: Optional[List[str]] = None):
+    def _import_module(self, module_name: str, from_names: Optional[List[str]] = None) -> bool:
         """
         Import a module by resolving its file path and parsing it.
         
         Args:
             module_name: Name of the module to import (e.g., 'vec3', 'builtin')
             from_names: Optional list of specific names to import (for 'from X import Y' syntax)
+            
+        Returns:
+            True if the module was successfully imported, False otherwise
         """
         # Resolve the module file path
         module_path = self._resolve_module_path(module_name)
@@ -407,11 +423,11 @@ class NaginiParser:
         if not module_path:
             # Module not found - this is not an error for now, as it might be a Python built-in
             # or external module that doesn't need Nagini compilation
-            return
+            return False
         
         # Check if already imported to avoid circular imports
         if module_path in self.imported_files:
-            return
+            return True  # Already imported, consider it successful
         
         # Mark as imported
         self.imported_files.add(module_path)
@@ -422,7 +438,7 @@ class NaginiParser:
                 imported_source = f.read()
         except (FileNotFoundError, PermissionError, IOError) as e:
             print(f"Warning: Could not read import file '{module_path}': {e}")
-            return
+            return False
         
         # Create a new parser for the imported file
         imported_parser = NaginiParser(source_file=str(module_path))
@@ -447,8 +463,10 @@ class NaginiParser:
                 # Import all classes and functions from the module
                 self.classes.update(imported_classes)
                 self.functions.update(imported_functions)
+            return True
         except (SyntaxError, ValueError) as e:
             print(f"Warning: Could not parse import file '{module_path}': {e}")
+            return False
     
     def _resolve_module_path(self, module_name: str) -> Optional[str]:
         """
