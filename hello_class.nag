@@ -26,6 +26,8 @@ class NativeVec3:
         self.x = x
         self.y = y
         self.z = z
+    def mul(self, scalar: float):
+        return NativeVec3(self.x * scalar, self.y * scalar, self.z * scalar)
     def magnitude(self) -> float:
         return (self.x**2 + self.y**2 + self.z**2) ** 0.5
     def __str__(self) -> str:
@@ -47,6 +49,12 @@ if __name__ == "__main__":
     print(v.magnitude())
     print(v)
     print(len(v))
+    print('hello native vec3!')
+    nv = NativeVec3(4.0, 5.0, 6.0)
+    print(nv.magnitude())
+    print(nv)
+    nv2 = nv.mul(2.0)
+    print(f'nv2 = nv.mul(2.0): {nv2}')
     print('hello loops:')
     total = 0
     for i in range(5):

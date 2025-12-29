@@ -28,6 +28,7 @@ typedef enum {
     OBJ_TYPE_FUNCTION  = 10,
     OBJ_TYPE_VIEW      = 11,
     OBJ_TYPE_ITER      = 12,
+    OBJ_TYPE_NATIVE    = 13
 } ObjectType;
 
 const char* obj_type_names[] = {
@@ -1860,6 +1861,43 @@ Object* NgToString(Runtime* runtime, void* obj) {
             snprintf(buffer, sizeof(buffer), "<Instance at %p>", (void*)o);
             return alloc_str(runtime, buffer);
         }
+        case OBJ_TYPE_FUNCTION: {
+            char buffer[131072];
+            snprintf(buffer, sizeof(buffer), "<Function at %p>", (void*)o);
+            return alloc_str(runtime, buffer);
+        }
+        case OBJ_TYPE_VIEW: {
+            char buffer[131072];
+            snprintf(buffer, sizeof(buffer), "<View at %p>", (void*)o);
+            return alloc_str(runtime, buffer);
+        }
+        case OBJ_TYPE_ITER: {
+            char buffer[131072];
+            snprintf(buffer, sizeof(buffer), "<Iterator at %p>", (void*)o);
+            return alloc_str(runtime, buffer);
+        }
+        case OBJ_TYPE_NATIVE: {
+            InstanceObject* instance = (InstanceObject*)o;
+            Dict* dict = instance->__dict__;
+            if (dict) {
+                StringObject* str_method = (StringObject*)runtime->builtin_names.__str__;
+                Object* str_func = dict_get(runtime, dict, (Object*)str_method);
+                if (str_func) {
+                    // Call __str__ method using new calling convention
+                    // All methods now use (Runtime*, Tuple*, Dict*) signature
+                    Object* args_array[1] = {o};
+                    Tuple* args = (Tuple*)alloc_tuple(runtime, 1, args_array);
+                    Object* result = NgCall(runtime, INCREF(runtime, str_func), args, NULL);
+                    DECREF(runtime, str_func);
+                    return result;
+                }
+            }
+
+            char buffer[131072];
+            snprintf(buffer, sizeof(buffer), "<NativeStruct at %p>", (void*)o);
+            return alloc_str(runtime, buffer);
+        }
+
         case OBJ_TYPE_DICT: {
             Dict* dict = (Dict*)o;
             char buffer[262144];
