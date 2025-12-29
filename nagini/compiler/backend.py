@@ -63,6 +63,7 @@ class LLVMBackend:
         self.ir = ir
         self.output_code = []
         self.declared_vars = set()  # Track declared variables
+        self.native_vars = {}  # Track native variables: {var_name: native_type}
         self.main_function: Optional[FunctionIR] = None
         self._zero_const_id: Optional[int] = None
         self._one_const_id: Optional[int] = None
@@ -491,6 +492,7 @@ class LLVMBackend:
         
         # Track declared variables for this method
         self.declared_vars = set()
+        self.native_vars = {}  # Reset native vars for each method
         
         # Store current class info for native field access
         self.current_class_info = class_info
@@ -527,16 +529,38 @@ class LLVMBackend:
         self.output_code.append(f'        exit(1);')
         self.output_code.append(f'    }}')
         self.output_code.append('')
+        
+        # Track which parameters will be converted to native in native paradigm
+        native_converted_params = set()
+        if class_info.paradigm == 'native':
+            for param_name, param_type in method_ir.params:
+                if param_name != 'self' and param_type in ['int', 'float', 'bool']:
+                    native_converted_params.add(param_name)
+        
         for i, (param_name, param_type) in enumerate(method_ir.params):
             self.output_code.append(f'    /* Extract parameter: {param_name} */')
-            self.output_code.append(f'    Object* {param_name} = args->items[{i}];')
-            if param_type:
-                self.output_code.append(f'    char pName_{param_name}[64];')
-                self.output_code.append(f'    NgGetTypeName(runtime, {param_name}, pName_{param_name}, sizeof(pName_{param_name}));')
-                self.output_code.append(f'    if (strcmp("{param_type}", pName_{param_name}) != 0) {{')
-                self.output_code.append(f'        fprintf(stderr, "Runtime Error: Received wrong type for parameter \'{param_name}\' in method \'{class_info.name}.{method_ir.name}\'.\\n Expected type: {param_type}, got: %s\\n", pName_{param_name});')
-                self.output_code.append(f'        exit(1);')
-                self.output_code.append(f'    }}')
+            
+            # For native paradigm with typed parameters, use UUID suffix for Object*
+            if param_name in native_converted_params:
+                obj_var_name = f'{param_name}_obj'
+                self.output_code.append(f'    Object* {obj_var_name} = args->items[{i}];')
+                if param_type:
+                    self.output_code.append(f'    char pName_{param_name}[64];')
+                    self.output_code.append(f'    NgGetTypeName(runtime, {obj_var_name}, pName_{param_name}, sizeof(pName_{param_name}));')
+                    self.output_code.append(f'    if (strcmp("{param_type}", pName_{param_name}) != 0) {{')
+                    self.output_code.append(f'        fprintf(stderr, "Runtime Error: Received wrong type for parameter \'{param_name}\' in method \'{class_info.name}.{method_ir.name}\'.\\n Expected type: {param_type}, got: %s\\n", pName_{param_name});')
+                    self.output_code.append(f'        exit(1);')
+                    self.output_code.append(f'    }}')
+            else:
+                # Standard extraction for non-native or self parameter
+                self.output_code.append(f'    Object* {param_name} = args->items[{i}];')
+                if param_type:
+                    self.output_code.append(f'    char pName_{param_name}[64];')
+                    self.output_code.append(f'    NgGetTypeName(runtime, {param_name}, pName_{param_name}, sizeof(pName_{param_name}));')
+                    self.output_code.append(f'    if (strcmp("{param_type}", pName_{param_name}) != 0) {{')
+                    self.output_code.append(f'        fprintf(stderr, "Runtime Error: Received wrong type for parameter \'{param_name}\' in method \'{class_info.name}.{method_ir.name}\'.\\n Expected type: {param_type}, got: %s\\n", pName_{param_name});')
+                    self.output_code.append(f'        exit(1);')
+                    self.output_code.append(f'    }}')
             
         # For native paradigm, cast self and extract native parameters
         if class_info.paradigm == 'native':
@@ -547,12 +571,16 @@ class LLVMBackend:
             for i, (param_name, param_type) in enumerate(method_ir.params):
                 if param_name != 'self' and param_type in ['int', 'float', 'bool']:
                     c_type = self._map_type_to_c(param_type)
+                    obj_var_name = f'{param_name}_obj'
                     if param_type == 'int':
-                        self.output_code.append(f'    {c_type} {param_name}_native = NgCastToInt(runtime, {param_name});')
+                        self.output_code.append(f'    {c_type} {param_name} = NgCastToInt(runtime, {obj_var_name});')
+                        self.native_vars[param_name] = 'int'
                     elif param_type == 'float':
-                        self.output_code.append(f'    {c_type} {param_name}_native = NgCastToFloat(runtime, {param_name});')
+                        self.output_code.append(f'    {c_type} {param_name} = NgCastToFloat(runtime, {obj_var_name});')
+                        self.native_vars[param_name] = 'float'
                     elif param_type == 'bool':
-                        self.output_code.append(f'    {c_type} {param_name}_native = NgCastToInt(runtime, {param_name}) != 0;')
+                        self.output_code.append(f'    {c_type} {param_name} = NgCastToInt(runtime, {obj_var_name}) != 0;')
+                        self.native_vars[param_name] = 'bool'
         
         # Verify hmap_get(self.hmap, symbol_id) against expected types for strict parameters (symbol_id should be of '__typename__' convention)
             
@@ -1220,7 +1248,17 @@ class LLVMBackend:
 
         elif isinstance(expr, VariableIR):
             # Variable reference
-            return expr.name
+            var_name = expr.name
+            # If this is a native variable in a native method, box it for Object operations
+            if var_name in self.native_vars:
+                native_type = self.native_vars[var_name]
+                if native_type == 'int':
+                    return f'alloc_int(runtime, {var_name})'
+                elif native_type == 'float':
+                    return f'alloc_float(runtime, {var_name})'
+                elif native_type == 'bool':
+                    return f'alloc_bool(runtime, {var_name})'
+            return var_name
 
         elif isinstance(expr, TupleIR):
             elements_code = [self._gen_expr(e) for e in expr.elements]

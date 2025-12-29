@@ -53,6 +53,8 @@ if __name__ == "__main__":
     nv = NativeVec3(4.0, 5.0, 6.0)
     print(nv.magnitude())
     print(nv)
+    nv2 = nv.mul(2.0)
+    print(f'nv2 = nv.mul(2.0): {nv2}')
     print('hello loops:')
     total = 0
     for i in range(5):
