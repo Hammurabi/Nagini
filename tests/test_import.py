@@ -165,6 +165,42 @@ def my_function(x: int) -> int:
         self.assertEqual(len(top_level_stmts), 1)
         self.assertIsInstance(top_level_stmts[0], ast.Assign)
         self.assertEqual(top_level_stmts[0].targets[0].id, 'mm')
+    
+    def test_import_alias_namespace_access(self):
+        """Test that namespace access works with import aliases (e.g., alias.function())."""
+        # Create a module file with a function
+        module_path = Path(self.test_dir) / "mymodule.nag"
+        module_path.write_text("""
+def greet(name: str) -> str:
+    return f"Hello, {name}!"
+""")
+        
+        # Create a source file that uses namespace access
+        source_path = Path(self.test_dir) / "main.nag"
+        source_code = """import mymodule as mm
+result = mm.greet("World")
+"""
+        
+        # Parse the source
+        parser = NaginiParser(source_file=str(source_path))
+        classes, functions, top_level_stmts = parser.parse(source_code)
+        
+        # Verify that the function was imported
+        self.assertIn('greet', functions)
+        
+        # Verify that module alias was tracked
+        self.assertIn('mm', parser.module_aliases)
+        self.assertEqual(parser.module_aliases['mm']['module_name'], 'mymodule')
+        
+        # Verify that the namespace access was transformed
+        # The second statement should be the assignment with transformed call
+        self.assertGreaterEqual(len(top_level_stmts), 2)
+        assign_stmt = top_level_stmts[1]
+        self.assertIsInstance(assign_stmt, ast.Assign)
+        # The call should have been transformed from mm.greet() to greet()
+        self.assertIsInstance(assign_stmt.value, ast.Call)
+        self.assertIsInstance(assign_stmt.value.func, ast.Name)
+        self.assertEqual(assign_stmt.value.func.id, 'greet')
 
 
 if __name__ == "__main__":

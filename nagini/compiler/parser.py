@@ -121,6 +121,7 @@ class NaginiParser:
         self.top_level_stmts: List[ast.stmt] = []
         self.source_file = source_file
         self.imported_files: Set[str] = set()  # Track imported files to avoid circular imports
+        self.module_aliases: Dict[str, Dict[str, str]] = {}  # Track module aliases: {alias_name: {module_name: module_path, functions: {func_name: ...}}}
         
     def parse(self, source_code: str) -> tuple[Dict[str, ClassInfo], Dict[str, FunctionInfo], List[ast.stmt]]:
         """
@@ -163,7 +164,51 @@ class NaginiParser:
                 # These will be used to generate the main() function
                 self.top_level_stmts.append(node)
 
+        # Post-process: Transform module alias attribute accesses
+        if self.module_aliases:
+            self.top_level_stmts = [self._transform_module_aliases(stmt) for stmt in self.top_level_stmts]
+
         return self.classes, self.functions, self.top_level_stmts
+    
+    def _transform_module_aliases(self, node):
+        """
+        Transform AST nodes to replace module alias attribute accesses.
+        For example, `o.get_os_name()` becomes `get_os_name()` where `o` is an alias for module `os`.
+        """
+        class ModuleAliasTransformer(ast.NodeTransformer):
+            def __init__(self, module_aliases):
+                self.module_aliases = module_aliases
+            
+            def visit_Attribute(self, node):
+                # Check if this is accessing an attribute on a module alias
+                if isinstance(node.value, ast.Name) and node.value.id in self.module_aliases:
+                    # This is module_alias.attribute_name
+                    # We don't transform it here, it will be handled in visit_Call
+                    pass
+                return self.generic_visit(node)
+            
+            def visit_Call(self, node):
+                # Check if we're calling a function via module alias (e.g., o.get_os_name())
+                if isinstance(node.func, ast.Attribute):
+                    if isinstance(node.func.value, ast.Name) and node.func.value.id in self.module_aliases:
+                        alias_name = node.func.value.id
+                        func_name = node.func.attr
+                        module_info = self.module_aliases[alias_name]
+                        
+                        # Check if this function exists in the module
+                        if func_name in module_info['functions']:
+                            # Transform o.get_os_name() to get_os_name()
+                            new_node = ast.Call(
+                                func=ast.Name(id=func_name, ctx=ast.Load()),
+                                args=node.args,
+                                keywords=node.keywords
+                            )
+                            return ast.copy_location(new_node, node)
+                
+                return self.generic_visit(node)
+        
+        transformer = ModuleAliasTransformer(self.module_aliases)
+        return transformer.visit(node)
     
     def _parse_class(self, node: ast.ClassDef) -> ClassInfo:
         """
@@ -388,11 +433,16 @@ class NaginiParser:
                 module_name = alias.name
                 alias_name = alias.asname if alias.asname else None
                 
-                # Import the module contents
-                module_imported = self._import_module(module_name)
+                # Import the module contents  
+                imported_functions = self._import_module(module_name)
                 
-                # If an alias is used (e.g., import os as o), create a module reference
-                if alias_name and module_imported:
+                # If an alias is used (e.g., import os as o), track it
+                if alias_name and imported_functions is not None:
+                    # Store module alias mapping
+                    self.module_aliases[alias_name] = {
+                        'module_name': module_name,
+                        'functions': imported_functions
+                    }
                     # Create an assignment: alias = "<module_name>"
                     # This allows the alias to be referenced in code (e.g., print(o))
                     assign_node = ast.Assign(
@@ -406,7 +456,7 @@ class NaginiParser:
             if module_name:
                 self._import_module(module_name, from_names=[alias.name for alias in node.names])
     
-    def _import_module(self, module_name: str, from_names: Optional[List[str]] = None) -> bool:
+    def _import_module(self, module_name: str, from_names: Optional[List[str]] = None) -> Optional[Dict[str, Any]]:
         """
         Import a module by resolving its file path and parsing it.
         
@@ -415,7 +465,7 @@ class NaginiParser:
             from_names: Optional list of specific names to import (for 'from X import Y' syntax)
             
         Returns:
-            True if the module was successfully imported, False otherwise
+            Dictionary of imported functions if successful, None otherwise
         """
         # Resolve the module file path
         module_path = self._resolve_module_path(module_name)
@@ -423,11 +473,12 @@ class NaginiParser:
         if not module_path:
             # Module not found - this is not an error for now, as it might be a Python built-in
             # or external module that doesn't need Nagini compilation
-            return False
+            return None
         
         # Check if already imported to avoid circular imports
         if module_path in self.imported_files:
-            return True  # Already imported, consider it successful
+            # Already imported - return the functions we already have
+            return {name: func for name, func in self.functions.items()}
         
         # Mark as imported
         self.imported_files.add(module_path)
@@ -438,7 +489,7 @@ class NaginiParser:
                 imported_source = f.read()
         except (FileNotFoundError, PermissionError, IOError) as e:
             print(f"Warning: Could not read import file '{module_path}': {e}")
-            return False
+            return None
         
         # Create a new parser for the imported file
         imported_parser = NaginiParser(source_file=str(module_path))
@@ -459,14 +510,15 @@ class NaginiParser:
                     else:
                         # Warn if the requested name is not found
                         print(f"Warning: Name '{name}' not found in module '{module_path}'")
+                return None  # Don't return functions for "from" imports
             else:
                 # Import all classes and functions from the module
                 self.classes.update(imported_classes)
                 self.functions.update(imported_functions)
-            return True
+                return imported_functions  # Return the imported functions for alias tracking
         except (SyntaxError, ValueError) as e:
             print(f"Warning: Could not parse import file '{module_path}': {e}")
-            return False
+            return None
     
     def _resolve_module_path(self, module_name: str) -> Optional[str]:
         """
