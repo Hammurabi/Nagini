@@ -198,17 +198,24 @@ class NaginiParser:
                         # Check if this function exists in the module
                         if func_name in module_info['functions']:
                             # Transform o.get_os_name() to get_os_name()
+                            new_func_name = ast.Name(id=func_name, ctx=ast.Load())
+                            ast.copy_location(new_func_name, node.func)
                             new_node = ast.Call(
-                                func=ast.Name(id=func_name, ctx=ast.Load()),
+                                func=new_func_name,
                                 args=node.args,
                                 keywords=node.keywords
                             )
-                            return ast.copy_location(new_node, node)
+                            new_node = ast.copy_location(new_node, node)
+                            ast.fix_missing_locations(new_node)
+                            return new_node
                 
                 return self.generic_visit(node)
         
         transformer = ModuleAliasTransformer(self.module_aliases)
-        return transformer.visit(node)
+        transformed = transformer.visit(node)
+        # Ensure all nodes have location information
+        ast.fix_missing_locations(transformed)
+        return transformed
     
     def _parse_class(self, node: ast.ClassDef) -> ClassInfo:
         """
@@ -449,6 +456,12 @@ class NaginiParser:
                         targets=[ast.Name(id=alias_name, ctx=ast.Store())],
                         value=ast.Constant(value=f"<module '{module_name}'>")
                     )
+                    # Copy location information from the import statement
+                    ast.copy_location(assign_node, node)
+                    assign_node.targets[0].lineno = node.lineno
+                    assign_node.targets[0].col_offset = node.col_offset
+                    assign_node.value.lineno = node.lineno
+                    assign_node.value.col_offset = node.col_offset
                     self.top_level_stmts.append(assign_node)
         elif isinstance(node, ast.ImportFrom):
             # Handle: from module_name import name1, name2
