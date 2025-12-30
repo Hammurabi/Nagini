@@ -1,0 +1,15 @@
+"""
+    The `nagini.compiler.ng.os` module provides operating system-related utilities for the Nagini compiler.
+"""
+
+def get_os_name() -> str:
+    """
+        Returns the name of the operating system.
+    """
+    return "SampleOS"
+
+def get_os_version() -> str:
+    """
+        Returns the version of the operating system.
+    """
+    return "1.0.0"

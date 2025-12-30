@@ -18,7 +18,9 @@ parser, allowing rapid development and leveraging Python's robust parsing capabi
 """
 
 import ast
-from typing import Dict, List, Optional, Any
+import os
+from pathlib import Path
+from typing import Dict, List, Optional, Any, Set, Union
 from dataclasses import dataclass, field
 
 
@@ -106,10 +108,20 @@ class NaginiParser:
         'str': 8,      # Pointer size (char* in C)
     }
     
-    def __init__(self):
+    def __init__(self, source_file: Optional[str] = None):
+        """
+        Initialize the Nagini parser.
+        
+        Args:
+            source_file: Optional path to the source file being parsed. 
+                        Used for resolving import statements relative to the source file location.
+        """
         self.classes: Dict[str, ClassInfo] = {}
         self.functions: Dict[str, FunctionInfo] = {}
         self.top_level_stmts: List[ast.stmt] = []
+        self.source_file = source_file
+        self.imported_files: Set[str] = set()  # Track imported files to avoid circular imports
+        self.module_aliases: Dict[str, Dict[str, str]] = {}  # Track module aliases: {alias_name: {module_name: module_path, functions: {func_name: ...}}}
         
     def parse(self, source_code: str) -> tuple[Dict[str, ClassInfo], Dict[str, FunctionInfo], List[ast.stmt]]:
         """
@@ -136,7 +148,10 @@ class NaginiParser:
         
         # Walk only top-level nodes (we don't use ast.walk to avoid nested functions)
         for node in tree.body:
-            if isinstance(node, ast.ClassDef):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                # Handle import statements
+                self._handle_import(node)
+            elif isinstance(node, ast.ClassDef):
                 # Extract class definition
                 class_info = self._parse_class(node)
                 self.classes[class_info.name] = class_info
@@ -149,7 +164,58 @@ class NaginiParser:
                 # These will be used to generate the main() function
                 self.top_level_stmts.append(node)
 
+        # Post-process: Transform module alias attribute accesses
+        if self.module_aliases:
+            self.top_level_stmts = [self._transform_module_aliases(stmt) for stmt in self.top_level_stmts]
+
         return self.classes, self.functions, self.top_level_stmts
+    
+    def _transform_module_aliases(self, node):
+        """
+        Transform AST nodes to replace module alias attribute accesses.
+        For example, `o.get_os_name()` becomes `get_os_name()` where `o` is an alias for module `os`.
+        """
+        class ModuleAliasTransformer(ast.NodeTransformer):
+            def __init__(self, module_aliases):
+                self.module_aliases = module_aliases
+            
+            def visit_Attribute(self, node):
+                # Check if this is accessing an attribute on a module alias
+                if isinstance(node.value, ast.Name) and node.value.id in self.module_aliases:
+                    # This is module_alias.attribute_name
+                    # We don't transform it here, it will be handled in visit_Call
+                    pass
+                return self.generic_visit(node)
+            
+            def visit_Call(self, node):
+                # Check if we're calling a function via module alias (e.g., o.get_os_name())
+                if isinstance(node.func, ast.Attribute):
+                    if isinstance(node.func.value, ast.Name) and node.func.value.id in self.module_aliases:
+                        alias_name = node.func.value.id
+                        func_name = node.func.attr
+                        module_info = self.module_aliases[alias_name]
+                        
+                        # Check if this function exists in the module
+                        if func_name in module_info['functions']:
+                            # Transform o.get_os_name() to get_os_name()
+                            new_func_name = ast.Name(id=func_name, ctx=ast.Load())
+                            ast.copy_location(new_func_name, node.func)
+                            new_node = ast.Call(
+                                func=new_func_name,
+                                args=node.args,
+                                keywords=node.keywords
+                            )
+                            new_node = ast.copy_location(new_node, node)
+                            ast.fix_missing_locations(new_node)
+                            return new_node
+                
+                return self.generic_visit(node)
+        
+        transformer = ModuleAliasTransformer(self.module_aliases)
+        transformed = transformer.visit(node)
+        # Ensure all nodes have location information
+        ast.fix_missing_locations(transformed)
+        return transformed
     
     def _parse_class(self, node: ast.ClassDef) -> ClassInfo:
         """
@@ -349,3 +415,157 @@ class NaginiParser:
             # Check if function has @staticmethod decorator
             is_static=any(isinstance(deco, ast.Name) and deco.id == 'staticmethod' for deco in node.decorator_list)
         )
+    
+    def _handle_import(self, node: Union[ast.Import, ast.ImportFrom]):
+        """
+        Handle import and from...import statements.
+        
+        Resolves the module file path and parses it to import classes and functions.
+        Search order:
+        1. Local directory (same as source file) - looks for .nag files
+        2. compiler/ng directory - looks for .ng files
+        
+        Args:
+            node: ast.Import or ast.ImportFrom node
+            
+        Note:
+            This method handles file I/O and parsing errors gracefully by issuing warnings
+            rather than raising exceptions. Missing modules or parse errors will not halt
+            compilation, which allows for importing Python built-ins or external modules
+            that don't require Nagini compilation.
+        """
+        if isinstance(node, ast.Import):
+            # Handle: import module_name [as alias]
+            for alias in node.names:
+                module_name = alias.name
+                alias_name = alias.asname if alias.asname else None
+                
+                # Import the module contents  
+                imported_functions = self._import_module(module_name)
+                
+                # If an alias is used (e.g., import os as o), track it
+                if alias_name and imported_functions is not None:
+                    # Store module alias mapping
+                    self.module_aliases[alias_name] = {
+                        'module_name': module_name,
+                        'functions': imported_functions
+                    }
+                    # Create an assignment: alias = "<module_name>"
+                    # This allows the alias to be referenced in code (e.g., print(o))
+                    assign_node = ast.Assign(
+                        targets=[ast.Name(id=alias_name, ctx=ast.Store())],
+                        value=ast.Constant(value=f"<module '{module_name}'>")
+                    )
+                    # Copy location information from the import statement
+                    ast.copy_location(assign_node, node)
+                    assign_node.targets[0].lineno = node.lineno
+                    assign_node.targets[0].col_offset = node.col_offset
+                    assign_node.value.lineno = node.lineno
+                    assign_node.value.col_offset = node.col_offset
+                    self.top_level_stmts.append(assign_node)
+        elif isinstance(node, ast.ImportFrom):
+            # Handle: from module_name import name1, name2
+            module_name = node.module
+            if module_name:
+                self._import_module(module_name, from_names=[alias.name for alias in node.names])
+    
+    def _import_module(self, module_name: str, from_names: Optional[List[str]] = None) -> Optional[Dict[str, Any]]:
+        """
+        Import a module by resolving its file path and parsing it.
+        
+        Args:
+            module_name: Name of the module to import (e.g., 'vec3', 'builtin')
+            from_names: Optional list of specific names to import (for 'from X import Y' syntax)
+            
+        Returns:
+            Dictionary of imported functions if successful, None otherwise
+        """
+        # Resolve the module file path
+        module_path = self._resolve_module_path(module_name)
+        
+        if not module_path:
+            # Module not found - this is not an error for now, as it might be a Python built-in
+            # or external module that doesn't need Nagini compilation
+            return None
+        
+        # Check if already imported to avoid circular imports
+        if module_path in self.imported_files:
+            # Already imported - return the functions we already have
+            return {name: func for name, func in self.functions.items()}
+        
+        # Mark as imported
+        self.imported_files.add(module_path)
+        
+        # Read and parse the imported file
+        try:
+            with open(module_path, 'r') as f:
+                imported_source = f.read()
+        except (FileNotFoundError, PermissionError, IOError) as e:
+            print(f"Warning: Could not read import file '{module_path}': {e}")
+            return None
+        
+        # Create a new parser for the imported file
+        imported_parser = NaginiParser(source_file=str(module_path))
+        imported_parser.imported_files = self.imported_files  # Share the imported files set
+        
+        try:
+            imported_classes, imported_functions, _ = imported_parser.parse(imported_source)
+            
+            # Merge imported classes and functions into current parser
+            # If from_names is specified, only import those specific names
+            if from_names:
+                # Import only specified names
+                for name in from_names:
+                    if name in imported_classes:
+                        self.classes[name] = imported_classes[name]
+                    elif name in imported_functions:
+                        self.functions[name] = imported_functions[name]
+                    else:
+                        # Warn if the requested name is not found
+                        print(f"Warning: Name '{name}' not found in module '{module_path}'")
+                return None  # Don't return functions for "from" imports
+            else:
+                # Import all classes and functions from the module
+                self.classes.update(imported_classes)
+                self.functions.update(imported_functions)
+                return imported_functions  # Return the imported functions for alias tracking
+        except (SyntaxError, ValueError) as e:
+            print(f"Warning: Could not parse import file '{module_path}': {e}")
+            return None
+    
+    def _resolve_module_path(self, module_name: str) -> Optional[str]:
+        """
+        Resolve a module name to a file path.
+        
+        Search order:
+        1. Look for {module_name}.nag in the same directory as source file
+        2. Look for {module_name}.ng in compiler/ng directory
+        
+        Args:
+            module_name: Name of the module (e.g., 'vec3', 'builtin')
+            
+        Returns:
+            Absolute path to the module file, or None if not found
+        """
+        # Determine the source directory
+        if self.source_file:
+            source_dir = Path(self.source_file).parent.absolute()
+        else:
+            source_dir = Path.cwd()
+        
+        # First, search locally for .nag files
+        local_path = source_dir / f"{module_name}.nag"
+        if local_path.exists() and local_path.is_file():
+            return str(local_path.absolute())
+        
+        # Second, search in compiler/ng directory for .ng files
+        # Get the compiler package directory
+        compiler_dir = Path(__file__).parent
+        ng_dir = compiler_dir / 'ng'
+        ng_path = ng_dir / f"{module_name}.ng"
+        
+        if ng_path.exists() and ng_path.is_file():
+            return str(ng_path.absolute())
+        
+        # Module not found
+        return None

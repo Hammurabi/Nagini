@@ -206,3 +206,9 @@ debug_adds.txt
 test_str_member.nag
 test_str_member.c
 test_debug_str.c
+
+# Test executables from import tests
+test_import
+test_import_builtin
+test_multi
+hello_test

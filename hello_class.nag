@@ -1,3 +1,4 @@
+import os as o
 @property(paradigm='object')
 class Vec3:
     x: float
@@ -105,6 +106,8 @@ if __name__ == "__main__":
     print(f'hello sets: {u}')
     s.add(4)
     print(f'hello sets after add: {s}')
+    print(o)
+    print(o.get_os_name())
     # with nexc('cpu') as optim: # or gpu
     #     array = optim.array(300, type=optim.fp32)
     #     for i in range(100):
